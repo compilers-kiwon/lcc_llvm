@@ -7,6 +7,72 @@
 #define I(f) llvm_##f
 static char rcsid[] = "$Id$";
 
+/* initialized global data, collected until the global is complete */
+enum { Kconst, Kspace };
+typedef struct item *Item;
+struct item {
+	int kind;
+	char *type, *val;	/* Kconst */
+	int n;			/* Kspace */
+	Item link;
+};
+typedef struct gdata *Gdata;
+struct gdata {
+	char *name, *linkage;
+	int constant, align;
+	Item items, *tail;
+	Gdata link;
+};
+static Gdata pending;			/* global being initialized */
+
+static char *gname(Symbol);
+
+/* intstr - integer constant u of size bytes, as a signed decimal */
+static char *intstr(unsigned long u, int size) {
+	int bits = 8*size;
+
+	if (bits < 8*sizeof u) {
+		u &= ones(bits);
+		if (u>>(bits - 1))
+			u |= ~ones(bits);
+	}
+	return stringf("%D", (long)u);
+}
+
+/* floatstr - floating constant d of size bytes, in LLVM's hex form */
+static char *floatstr(long double d, int size) {
+	static union { int x; char endian; } little = { 1 };
+	double x = size == 4 ? (double)(float)d : (double)d;
+	unsigned char b[sizeof x];
+	char buf[2*sizeof x + 3], *s = buf;
+	int i;
+
+	memcpy(b, &x, sizeof x);
+	*s++ = '0';
+	*s++ = 'x';
+	for (i = 0; i < (int)sizeof x; i++) {
+		int c = b[little.endian ? sizeof x - 1 - i : i];
+		*s++ = "0123456789ABCDEF"[c>>4];
+		*s++ = "0123456789ABCDEF"[c&0xF];
+	}
+	*s = 0;
+	return string(buf);
+}
+
+static char *ptrstr(void *p) {
+	if (p == NULL)
+		return "null";
+	return stringf("inttoptr (i64 %D to ptr)", (long)p);
+}
+
+/* gname - LLVM name of symbol p, defining it if necessary */
+static char *gname(Symbol p) {
+	if (p->x.name == NULL)
+		(*IR->defsymbol)(p);
+	assert(p->x.name);
+	return p->x.name;
+}
+
 static void emitescaped(int len, const char *s) {
 	for ( ; len-- > 0; s++)
 		if (*s >= ' ' && *s < 0177 && *s != '"' && *s != '\\')
@@ -16,18 +82,133 @@ static void emitescaped(int len, const char *s) {
 				"0123456789ABCDEF"[*s&0xF]);
 }
 
+static void emititemtype(Item it) {
+	switch (it->kind) {
+	case Kconst:  print("%s", it->type); break;
+	case Kspace:  print("[%d x i8]", it->n); break;
+	default: assert(0);
+	}
+}
+
+static void emititemval(Item it) {
+	switch (it->kind) {
+	case Kconst:
+		print("%s", it->val);
+		break;
+	case Kspace:
+		print("zeroinitializer");
+		break;
+	default: assert(0);
+	}
+}
+
+static void emitglobal(Gdata g) {
+	Item it;
+
+	print("%s = %s%s ", g->name, g->linkage,
+		g->constant ? "constant" : "global");
+	if (g->items == NULL)
+		print("[0 x i8] zeroinitializer");
+	else if (g->items->link == NULL) {
+		emititemtype(g->items);
+		print(" ");
+		emititemval(g->items);
+	} else {
+		print("<{ ");
+		for (it = g->items; it; it = it->link) {
+			emititemtype(it);
+			print(it->link ? ", " : " }> <{ ");
+		}
+		for (it = g->items; it; it = it->link) {
+			emititemtype(it);
+			print(" ");
+			emititemval(it);
+			print(it->link ? ", " : " }>");
+		}
+	}
+	print(", align %d\n", g->align);
+}
+
+/* flushglobal - finish the pending global, if any */
+static void flushglobal(void) {
+	if (pending == NULL)
+		return;
+	emitglobal(pending);
+	pending = NULL;
+}
+
+static Item newitem(int kind) {
+	Item it;
+
+	assert(pending);
+	NEW0(it, PERM);
+	it->kind = kind;
+	*pending->tail = it;
+	pending->tail = &it->link;
+	return it;
+}
+
 static void I(address)(Symbol q, Symbol p, long n) {}
+
 static void I(blockbeg)(Env *e) {}
 static void I(blockend)(Env *e) {}
+
 static void I(defaddress)(Symbol p) {}
-static void I(defconst)(int suffix, int size, Value v) {}
+
+/* defconst - define a constant */
+static void I(defconst)(int suffix, int size, Value v) {
+	Item it = newitem(Kconst);
+
+	switch (suffix) {
+	case I: it->type = stringf("i%d", 8*size); it->val = intstr(v.i, size); break;
+	case U: it->type = stringf("i%d", 8*size); it->val = intstr(v.u, size); break;
+	case P: it->type = "ptr"; it->val = ptrstr(v.p); break;
+	case F: it->type = size == 4 ? "float" : "double";
+		it->val = floatstr(v.d, size); break;
+	default: assert(0);
+	}
+}
+
 static void I(defstring)(int len, char *s) {}
-static void I(defsymbol)(Symbol p) {}
+
+/* defsymbol - define a symbol: initialize p->x.name */
+static void I(defsymbol)(Symbol p) {
+	if (p->x.name)
+		return;
+	if (p->scope == LABELS)
+		p->x.name = stringf("L%s", p->name);
+	else if (p->scope == CONSTANTS)
+		p->x.name = p->name;
+	else if (p->sclass == STATIC && p->generated)
+		p->x.name = stringf("@.L%s", p->name);
+	else if (p->sclass == STATIC && p->scope >= LOCAL)
+		p->x.name = stringf("@%s.%d", p->name, genlabel(1));
+	else if (p->scope == GLOBAL || p->sclass == EXTERN)
+		p->x.name = stringf("@%s", p->name);
+	/* parameters and locals are named by function and local */
+}
+
 static void I(emit)(Node p) {}
+
 static void I(export)(Symbol p) {}
+
 static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {}
 static Node I(gen)(Node p) { return p; }
-static void I(global)(Symbol p) {}
+
+/* global - announce a global */
+static void I(global)(Symbol p) {
+	flushglobal();
+	NEW0(pending, PERM);
+	pending->name = gname(p);
+	if (p->sclass == STATIC)
+		pending->linkage = p->generated ? "private " : "internal ";
+	else
+		pending->linkage = "";
+	pending->constant = p->u.seg == LIT;
+	pending->align = p->type->align;
+	pending->tail = &pending->items;
+}
+
 static void I(import)(Symbol p) {}
 static void I(local)(Symbol p) {}
 
@@ -42,9 +223,18 @@ static void I(progbeg)(int argc, char *argv[]) {
 	print("target triple = \"x86_64-pc-linux-gnu\"\n\n");
 }
 
-static void I(progend)(void) {}
+/* progend - end of program */
+static void I(progend)(void) {
+	flushglobal();
+}
+
 static void I(segment)(int s) {}
-static void I(space)(int n) {}
+
+/* space - initialize n bytes of space */
+static void I(space)(int n) {
+	newitem(Kspace)->n = n;
+}
+
 static void I(stabblock)(int brace, int lev, Symbol *p) {}
 static void I(stabend)(Coordinate *cp, Symbol p, Coordinate **cpp, Symbol *sp, Symbol *stab) {}
 static void I(stabfend)(Symbol p, int lineno) {}
