@@ -229,6 +229,17 @@ static char *nodeval(Node p) {
 	case ADDRG: case ADDRF: case ADDRL:
 		v = gname(p->syms[0]);
 		break;
+	case INDIR:
+		if (optype(p->op) == B) {
+			unsupported(p);
+			return "undef";
+		}
+		{
+			char *a = nodeval(p->kids[0]);
+			v = newreg();
+			inst("%s = load %s, ptr %s", v, optypestr(p->op), a);
+		}
+		break;
 	default:
 		unsupported(p);
 		return "undef";
@@ -254,10 +265,23 @@ static void emitnode(Node p) {
 		inst("br label %%%s", gname(p->kids[0]->syms[0]));
 		terminated = 1;
 		break;
+	case ASGN:
+		if (optype(p->op) == B) {
+			unsupported(p);
+			break;
+		}
+		{
+			char *a = nodeval(p->kids[0]), *v = nodeval(p->kids[1]);
+			inst("store %s %s, ptr %s", optypestr(p->op), v, a);
+		}
+		break;
 	case RET:
 		if (optype(p->op) != V)
 			inst("store %s %s, ptr %%retval", optypestr(p->op),
 				nodeval(p->kids[0]));
+		break;
+	case INDIR:
+		(void)nodeval(p);
 		break;
 	default:
 		unsupported(p);
