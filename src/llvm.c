@@ -28,6 +28,43 @@ static Gdata pending;			/* global being initialized */
 
 static char *gname(Symbol);
 
+/* typestr - LLVM type for objects of type ty */
+static char *typestr(Type ty) {
+	ty = unqual(ty);
+	switch (ty->op) {
+	case INT: case UNSIGNED: case ENUM:
+		return stringf("i%d", 8*ty->size);
+	case FLOAT:
+		return ty->size == 4 ? "float" : "double";
+	case POINTER: case FUNCTION:
+		return "ptr";
+	case VOID:
+		return "void";
+	default:
+		return stringf("[%d x i8]", ty->size);
+	}
+}
+
+/* argtypestr - LLVM type of an argument of type ty */
+static char *argtypestr(Type ty) {
+	if (isstruct(ty))	/* wants_argb=0: passed by address */
+		return "ptr";
+	if (isint(ty) || isenum(ty))
+		return typestr(promote(ty));
+	return typestr(ty);
+}
+
+/* rettypestr - LLVM return type of function type fty */
+static char *rettypestr(Type fty) {
+	Type rty = freturn(fty);
+
+	if (isstruct(rty))	/* wants_callb=0: returned via hidden pointer */
+		return "void";
+	if (isint(rty) || isenum(rty))
+		rty = promote(rty);
+	return typestr(rty);
+}
+
 /* intstr - integer constant u of size bytes, as a signed decimal */
 static char *intstr(unsigned long u, int size) {
 	int bits = 8*size;
@@ -235,7 +272,25 @@ static void I(global)(Symbol p) {
 	pending->tail = &pending->items;
 }
 
-static void I(import)(Symbol p) {}
+/* import - declare an external symbol */
+static void I(import)(Symbol p) {
+	gname(p);
+	if (isfunc(p->type)) {
+		Type *proto = p->type->u.f.proto;
+		int i, n = 0;
+		print("declare %s %s(", rettypestr(p->type), p->x.name);
+		if (proto && !p->type->u.f.oldstyle) {
+			for (i = 0; proto[i] && proto[i] != voidtype; i++)
+				print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
+			if (variadic(p->type))
+				print(", ...");
+		} else
+			print("...");
+		print(")\n");
+	} else
+		print("%s = external global %s\n", p->x.name, typestr(p->type));
+}
+
 static void I(local)(Symbol p) {}
 
 /* progbeg - beginning of program */
