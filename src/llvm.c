@@ -8,11 +8,11 @@
 static char rcsid[] = "$Id$";
 
 /* initialized global data, collected until the global is complete */
-enum { Kconst, Kstring, Kspace };
+enum { Kconst, Kstring, Kspace, Kaddr };
 typedef struct item *Item;
 struct item {
 	int kind;
-	char *type, *val;	/* Kconst */
+	char *type, *val;	/* Kconst; val also for Kaddr */
 	char *s;		/* Kstring */
 	int n;			/* Kstring, Kspace */
 	Item link;
@@ -86,6 +86,7 @@ static void emitescaped(int len, const char *s) {
 static void emititemtype(Item it) {
 	switch (it->kind) {
 	case Kconst:  print("%s", it->type); break;
+	case Kaddr:   print("ptr"); break;
 	case Kstring:
 	case Kspace:  print("[%d x i8]", it->n); break;
 	default: assert(0);
@@ -94,7 +95,7 @@ static void emititemtype(Item it) {
 
 static void emititemval(Item it) {
 	switch (it->kind) {
-	case Kconst:
+	case Kconst: case Kaddr:
 		print("%s", it->val);
 		break;
 	case Kstring:
@@ -155,12 +156,24 @@ static Item newitem(int kind) {
 	return it;
 }
 
-static void I(address)(Symbol q, Symbol p, long n) {}
+/* address - initialize q for addressing expression p+n */
+static void I(address)(Symbol q, Symbol p, long n) {
+	if (p->scope == GLOBAL || p->sclass == STATIC || p->sclass == EXTERN)
+		q->x.name = stringf("getelementptr (i8, ptr %s, i64 %D)",
+			gname(p), n);
+}
 
 static void I(blockbeg)(Env *e) {}
 static void I(blockend)(Env *e) {}
 
-static void I(defaddress)(Symbol p) {}
+/* defaddress - initialize an address */
+static void I(defaddress)(Symbol p) {
+	if (p->scope == LABELS) {
+		error("llvm back end: label addresses are not supported\n");
+		return;
+	}
+	newitem(Kaddr)->val = gname(p);
+}
 
 /* defconst - define a constant */
 static void I(defconst)(int suffix, int size, Value v) {
