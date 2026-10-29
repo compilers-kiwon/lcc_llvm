@@ -8,12 +8,13 @@
 static char rcsid[] = "$Id$";
 
 /* initialized global data, collected until the global is complete */
-enum { Kconst, Kspace };
+enum { Kconst, Kstring, Kspace };
 typedef struct item *Item;
 struct item {
 	int kind;
 	char *type, *val;	/* Kconst */
-	int n;			/* Kspace */
+	char *s;		/* Kstring */
+	int n;			/* Kstring, Kspace */
 	Item link;
 };
 typedef struct gdata *Gdata;
@@ -85,6 +86,7 @@ static void emitescaped(int len, const char *s) {
 static void emititemtype(Item it) {
 	switch (it->kind) {
 	case Kconst:  print("%s", it->type); break;
+	case Kstring:
 	case Kspace:  print("[%d x i8]", it->n); break;
 	default: assert(0);
 	}
@@ -94,6 +96,11 @@ static void emititemval(Item it) {
 	switch (it->kind) {
 	case Kconst:
 		print("%s", it->val);
+		break;
+	case Kstring:
+		print("c\"");
+		emitescaped(it->n, it->s);
+		print("\"");
 		break;
 	case Kspace:
 		print("zeroinitializer");
@@ -169,7 +176,13 @@ static void I(defconst)(int suffix, int size, Value v) {
 	}
 }
 
-static void I(defstring)(int len, char *s) {}
+/* defstring - emit a string constant */
+static void I(defstring)(int len, char *s) {
+	Item it = newitem(Kstring);
+
+	it->s = memcpy(allocate(len, PERM), s, len);
+	it->n = len;
+}
 
 /* defsymbol - define a symbol: initialize p->x.name */
 static void I(defsymbol)(Symbol p) {
