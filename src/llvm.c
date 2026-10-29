@@ -28,6 +28,8 @@ struct gdata {
 	Gdata link;
 };
 static Gdata pending;			/* global being initialized */
+static Gdata deferred, *dtail = &deferred; /* completed while in a function */
+static int infunc;
 
 /* addresses of locals computed by address(), emitted after the allocas */
 struct laddr {
@@ -252,7 +254,11 @@ static void emitglobal(Gdata g) {
 static void flushglobal(void) {
 	if (pending == NULL)
 		return;
-	emitglobal(pending);
+	if (infunc) {
+		*dtail = pending;
+		dtail = &pending->link;
+	} else
+		emitglobal(pending);
 	pending = NULL;
 }
 
@@ -348,8 +354,10 @@ static void I(export)(Symbol p) {}
 static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
 	int i;
 	struct laddr *a;
+	Gdata g;
 
 	flushglobal();
+	infunc = 1;
 	laddrs = NULL;
 	ladtail = &laddrs;
 	nreg = nblock = 0;
@@ -390,6 +398,11 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		inst("ret %s %s", rettype, r);
 	}
 	print("}\n\n");
+	infunc = 0;
+	for (g = deferred; g; g = g->link)
+		emitglobal(g);
+	deferred = NULL;
+	dtail = &deferred;
 }
 
 /* gen - check the dags on list p; emit does the work */
