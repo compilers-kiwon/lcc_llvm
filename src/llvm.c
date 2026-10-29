@@ -4,7 +4,9 @@
  * LLVM back end: emits textual LLVM IR (.ll) for llvm/x86_64-linux.
  *
  * Locals and parameters live in allocas in the entry block; mem2reg
- * turns them into SSA values.
+ * turns them into SSA values.  The LLVM value of each dag node is kept
+ * in a table local to this file, so Xnode is not touched beyond what
+ * the front end itself uses.
  */
 
 #define I(f) llvm_##f
@@ -30,6 +32,15 @@ struct gdata {
 static Gdata pending;			/* global being initialized */
 static Gdata deferred, *dtail = &deferred; /* completed while in a function */
 static int infunc;
+
+/* LLVM value of each node in the current function */
+#define NVHASH 512
+struct nodeval {
+	Node node;
+	char *val;
+	struct nodeval *link;
+};
+static struct nodeval *nodevals[NVHASH];
 
 /* addresses of locals computed by address(), emitted after the allocas */
 struct laddr {
@@ -66,6 +77,38 @@ static void inst(const char *fmt, ...) {
 
 static char *newreg(void) {
 	return stringf("%%t%d", ++nreg);
+}
+
+static char *lookupval(Node p) {
+	struct nodeval *e;
+
+	for (e = nodevals[((unsigned long)p>>4)&(NVHASH-1)]; e; e = e->link)
+		if (e->node == p)
+			return e->val;
+	return NULL;
+}
+
+static void setval(Node p, char *val) {
+	struct nodeval *e;
+	unsigned h = ((unsigned long)p>>4)&(NVHASH-1);
+
+	NEW(e, FUNC);
+	e->node = p;
+	e->val = val;
+	e->link = nodevals[h];
+	nodevals[h] = e;
+}
+
+/* optypestr - LLVM type of operator op's type suffix */
+static char *optypestr(int op) {
+	switch (optype(op)) {
+	case I: case U: return stringf("i%d", 8*opsize(op));
+	case F: return opsize(op) == 4 ? "float" : "double";
+	case P: return "ptr";
+	case V: return "void";
+	}
+	assert(0);
+	return NULL;
 }
 
 /* typestr - LLVM type for objects of type ty */
@@ -143,6 +186,17 @@ static char *ptrstr(void *p) {
 	return stringf("inttoptr (i64 %D to ptr)", (long)p);
 }
 
+static char *cnststr(int op, Value v) {
+	switch (optype(op)) {
+	case I: return intstr(v.i, opsize(op));
+	case U: return intstr(v.u, opsize(op));
+	case P: return ptrstr(v.p);
+	case F: return floatstr(v.d, opsize(op));
+	}
+	assert(0);
+	return NULL;
+}
+
 /* gname - LLVM name of symbol p, defining it if necessary */
 static char *gname(Symbol p) {
 	if (p->x.name == NULL)
@@ -162,6 +216,27 @@ static void emitalloca(Symbol p) {
 		p->type->align);
 }
 
+/* nodeval - return the LLVM value of node p, emitting code for it */
+static char *nodeval(Node p) {
+	char *v = lookupval(p);
+
+	if (v)
+		return v;
+	switch (generic(p->op)) {
+	case CNST:
+		v = cnststr(p->op, p->syms[0]->u.c.v);
+		break;
+	case ADDRG: case ADDRF: case ADDRL:
+		v = gname(p->syms[0]);
+		break;
+	default:
+		unsupported(p);
+		return "undef";
+	}
+	setval(p, v);
+	return v;
+}
+
 /* emitnode - emit code for the root node p */
 static void emitnode(Node p) {
 	switch (generic(p->op)) {
@@ -178,6 +253,11 @@ static void emitnode(Node p) {
 		}
 		inst("br label %%%s", gname(p->kids[0]->syms[0]));
 		terminated = 1;
+		break;
+	case RET:
+		if (optype(p->op) != V)
+			inst("store %s %s, ptr %%retval", optypestr(p->op),
+				nodeval(p->kids[0]));
 		break;
 	default:
 		unsupported(p);
@@ -358,6 +438,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 
 	flushglobal();
 	infunc = 1;
+	memset(nodevals, 0, sizeof nodevals);
 	laddrs = NULL;
 	ladtail = &laddrs;
 	nreg = nblock = 0;
