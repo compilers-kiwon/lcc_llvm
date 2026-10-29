@@ -19,8 +19,8 @@ struct item {
 };
 typedef struct gdata *Gdata;
 struct gdata {
-	char *name, *linkage;
-	int constant, align;
+	char *name, *linkage, *type;
+	int constant, size, align;
 	Item items, *tail;
 	Gdata link;
 };
@@ -154,6 +154,9 @@ static void emitglobal(Gdata g) {
 		g->constant ? "constant" : "global");
 	if (g->items == NULL)
 		print("[0 x i8] zeroinitializer");
+	else if (g->items->link == NULL && g->items->kind == Kspace
+	&& g->items->n == g->size)	/* all zero: keep the C type */
+		print("%s zeroinitializer", g->type);
 	else if (g->items->link == NULL) {
 		emititemtype(g->items);
 		print(" ");
@@ -268,6 +271,8 @@ static void I(global)(Symbol p) {
 	else
 		pending->linkage = "";
 	pending->constant = p->u.seg == LIT;
+	pending->type = typestr(p->type);
+	pending->size = p->type->size;
 	pending->align = p->type->align;
 	pending->tail = &pending->items;
 }
