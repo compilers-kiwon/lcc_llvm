@@ -3,7 +3,7 @@
 /*
  * LLVM back end: emits textual LLVM IR (.ll) for llvm/x86_64-linux.
  *
- * Parameters live in allocas in the entry block; mem2reg
+ * Locals and parameters live in allocas in the entry block; mem2reg
  * turns them into SSA values.
  */
 
@@ -28,6 +28,14 @@ struct gdata {
 	Gdata link;
 };
 static Gdata pending;			/* global being initialized */
+
+/* addresses of locals computed by address(), emitted after the allocas */
+struct laddr {
+	Symbol q, p;
+	long n;
+	struct laddr *link;
+};
+static struct laddr *laddrs, **ladtail;
 
 static int nreg, nblock, nlocal;
 static int terminated;		/* current basic block has its terminator */
@@ -264,6 +272,17 @@ static void I(address)(Symbol q, Symbol p, long n) {
 	if (p->scope == GLOBAL || p->sclass == STATIC || p->sclass == EXTERN)
 		q->x.name = stringf("getelementptr (i8, ptr %s, i64 %D)",
 			gname(p), n);
+	else {
+		struct laddr *a;
+		NEW(a, FUNC);
+		a->q = q;
+		a->p = p;
+		a->n = n;
+		a->link = NULL;
+		*ladtail = a;
+		ladtail = &a->link;
+		q->x.name = stringf("%%c%d", ++nlocal);
+	}
 }
 
 static void I(blockbeg)(Env *e) {}
@@ -328,8 +347,11 @@ static void I(export)(Symbol p) {}
 /* function - generate code for a function */
 static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
 	int i;
+	struct laddr *a;
 
 	flushglobal();
+	laddrs = NULL;
+	ladtail = &laddrs;
 	nreg = nblock = 0;
 	terminated = 0;
 	rettype = rettypestr(f->type);
@@ -356,6 +378,9 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		}
 	}
 	gencode(caller, callee);
+	for (a = laddrs; a; a = a->link)
+		inst("%s = getelementptr i8, ptr %s, i64 %D",
+			a->q->x.name, gname(a->p), a->n);
 	emitcode();
 	if (strcmp(rettype, "void") == 0)
 		inst("ret void");
@@ -426,7 +451,11 @@ static void I(import)(Symbol p) {
 		print("%s = external global %s\n", p->x.name, typestr(p->type));
 }
 
-static void I(local)(Symbol p) {}
+/* local - local variable */
+static void I(local)(Symbol p) {
+	p->x.name = localname(p);
+	emitalloca(p);
+}
 
 /* progbeg - beginning of program */
 static void I(progbeg)(int argc, char *argv[]) {
