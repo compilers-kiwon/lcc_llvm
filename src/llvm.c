@@ -2,6 +2,9 @@
 
 /*
  * LLVM back end: emits textual LLVM IR (.ll) for llvm/x86_64-linux.
+ *
+ * Parameters live in allocas in the entry block; mem2reg
+ * turns them into SSA values.
  */
 
 #define I(f) llvm_##f
@@ -26,7 +29,34 @@ struct gdata {
 };
 static Gdata pending;			/* global being initialized */
 
+static int nreg, nblock, nlocal;
+static int terminated;		/* current basic block has its terminator */
+static char *rettype;		/* LLVM return type of the current function */
+
 static char *gname(Symbol);
+
+static void unsupported(Node p) {
+	error("llvm back end: unsupported operator `%s'\n", opname(p->op));
+}
+
+/* inst - emit one instruction, opening a new basic block if needed */
+static void inst(const char *fmt, ...) {
+	va_list ap;
+
+	if (terminated) {
+		print("b%d:\n", ++nblock);
+		terminated = 0;
+	}
+	print("  ");
+	va_start(ap, fmt);
+	vfprint(stdout, NULL, fmt, ap);
+	va_end(ap);
+	print("\n");
+}
+
+static char *newreg(void) {
+	return stringf("%%t%d", ++nreg);
+}
 
 /* typestr - LLVM type for objects of type ty */
 static char *typestr(Type ty) {
@@ -109,6 +139,39 @@ static char *gname(Symbol p) {
 		(*IR->defsymbol)(p);
 	assert(p->x.name);
 	return p->x.name;
+}
+
+static char *localname(Symbol p) {
+	if (*p->name >= '0' && *p->name <= '9')
+		return stringf("%%T%s.%d", p->name, ++nlocal);
+	return stringf("%%%s.%d", p->name, ++nlocal);
+}
+
+static void emitalloca(Symbol p) {
+	inst("%s = alloca %s, align %d", p->x.name, typestr(p->type),
+		p->type->align);
+}
+
+/* emitnode - emit code for the root node p */
+static void emitnode(Node p) {
+	switch (generic(p->op)) {
+	case LABEL:
+		if (!terminated)
+			print("  br label %%%s\n", gname(p->syms[0]));
+		print("%s:\n", gname(p->syms[0]));
+		terminated = 0;
+		break;
+	case JUMP:
+		if (specific(p->kids[0]->op) != ADDRG+P) {
+			unsupported(p);
+			break;
+		}
+		inst("br label %%%s", gname(p->kids[0]->syms[0]));
+		terminated = 1;
+		break;
+	default:
+		unsupported(p);
+	}
 }
 
 static void emitescaped(int len, const char *s) {
@@ -254,12 +317,79 @@ static void I(defsymbol)(Symbol p) {
 	/* parameters and locals are named by function and local */
 }
 
-static void I(emit)(Node p) {}
+/* emit - emit the dags on list p */
+static void I(emit)(Node p) {
+	for ( ; p; p = p->link)
+		emitnode(p);
+}
 
 static void I(export)(Symbol p) {}
 
-static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {}
-static Node I(gen)(Node p) { return p; }
+/* function - generate code for a function */
+static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
+	int i;
+
+	flushglobal();
+	nreg = nblock = 0;
+	terminated = 0;
+	rettype = rettypestr(f->type);
+
+	print("\ndefine %s%s %s(", f->sclass == STATIC ? "internal " : "",
+		rettype, gname(f));
+	for (i = 0; caller[i]; i++)
+		print("%s%s %%a%d", i ? ", " : "", typestr(caller[i]->type), i);
+	if (variadic(f->type))
+		print("%s...", i ? ", " : "");
+	print(") {\nentry:\n");
+	if (strcmp(rettype, "void") != 0)
+		inst("%%retval = alloca %s", rettype);
+	for (i = 0; caller[i]; i++) {
+		Symbol p = caller[i], q = callee[i];
+		p->x.name = localname(p);
+		emitalloca(p);
+		inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
+		if (q->sclass == p->sclass && q->type == p->type)
+			q->x.name = p->x.name;
+		else {	/* the front end assigns caller to callee */
+			q->x.name = localname(q);
+			emitalloca(q);
+		}
+	}
+	gencode(caller, callee);
+	emitcode();
+	if (strcmp(rettype, "void") == 0)
+		inst("ret void");
+	else {
+		char *r = newreg();
+		inst("%s = load %s, ptr %%retval", r, rettype);
+		inst("ret %s %s", rettype, r);
+	}
+	print("}\n\n");
+}
+
+/* gen - check the dags on list p; emit does the work */
+static Node I(gen)(Node p) {
+	Node q;
+
+	for (q = p; q; q = q->link) {
+		switch (generic(q->op)) {	/* check for valid forest */
+		case CALL:
+			break;
+		case ARG:
+		case ASGN: case JUMP: case LABEL: case RET:
+		case EQ: case GE: case GT: case LE: case LT: case NE:
+			assert(q->count == 0);
+			break;
+		case INDIR:
+			assert(q->count > 0);
+			break;
+		default:
+			assert(0);
+		}
+		check(q);
+	}
+	return p;
+}
 
 /* global - announce a global */
 static void I(global)(Symbol p) {
