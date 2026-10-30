@@ -89,6 +89,7 @@ struct pri {
 	{ 0, 0, 0 },		/* NAME1 */
 	{ 16, 1, UNARY },	/* DEFINED */
 	{ 16, 0, UNARY },	/* UMINUS */
+	{ 0, 0, 0 },		/* PLACEMARK */
 };
 
 int	evalop(struct pri);

@@ -71,6 +71,7 @@ static const char wstab[] = {
 	0,	/* NAME1 */
 	0,	/* DEFINED */
 	0,	/* UMINUS */
+	0,	/* PLACEMARK */
 };
 
 void

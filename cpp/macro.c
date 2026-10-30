@@ -342,9 +342,18 @@ substargs(Nlist *np, Tokenrow *rtr, Tokenrow **atr)
 		if (rtr->tp->type==NAME
 		 && (argno = lookuparg(np, rtr->tp)) >= 0) {
 			if ((rtr->tp+1)<rtr->lp && (rtr->tp+1)->type==DSHARP /* don't look beyond end */
-			 || rtr->tp!=rtr->bp && (rtr->tp-1)->type==DSHARP) /* don't look before beginning */
-				insertrow(rtr, 1, atr[argno]);
-			else {
+			 || rtr->tp!=rtr->bp && (rtr->tp-1)->type==DSHARP) { /* don't look before beginning */
+				if (rowlen(atr[argno]) == 0) {
+					/* empty argument next to ##: a placemarker (C99 6.10.3.3) */
+					static Token pm = { PLACEMARK, 0, 0, 0, 0, (uchar *)"" };
+					Tokenrow pmr;
+					pmr.tp = pmr.bp = &pm;
+					pmr.lp = &pm + 1;
+					pmr.max = 1;
+					insertrow(rtr, 1, &pmr);
+				} else
+					insertrow(rtr, 1, atr[argno]);
+			} else {
 				copytokenrow(&tatr, atr[argno]);
 				expandrow(&tatr, "<macro>");
 				insertrow(rtr, 1, &tatr);
@@ -377,6 +386,18 @@ doconcat(Tokenrow *trp)
 				error(ERROR, "## occurs at border of replacement");
 				continue;
 			}
+			if (ltp->type==PLACEMARK || ntp->type==PLACEMARK) {
+				/* x ## placemarker is x, and the other way round */
+				Token keep;
+				keep = ntp->type==PLACEMARK ? *ltp : *ntp;
+				ntr.tp = ntr.bp = &keep;
+				ntr.lp = &keep + 1;
+				ntr.max = 1;
+				trp->tp = ltp;
+				insertrow(trp, 3, &ntr);
+				trp->tp--;
+				continue;
+			}
 			len = ltp->len + ntp->len;
 			strncpy((char*)tt, (char*)ltp->t, ltp->len);
 			strncpy((char*)tt+ltp->len, (char*)ntp->t, ntp->len);
@@ -394,6 +415,15 @@ doconcat(Tokenrow *trp)
 			dofree(ntr.bp);
 			trp->tp--;
 		}
+	}
+	/* drop placemarkers that were not consumed by ## */
+	for (trp->tp=trp->bp; trp->tp<trp->lp; ) {
+		if (trp->tp->type==PLACEMARK) {
+			trp->tp += 1;
+			adjustrow(trp, -1);
+			trp->tp -= 1;
+		} else
+			trp->tp++;
 	}
 }
 
