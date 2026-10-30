@@ -50,6 +50,13 @@ struct laddr {
 };
 static struct laddr *laddrs, **ladtail;
 
+/* arguments listed since the last call; they all belong to the next CALL */
+struct arg {
+	char *type, *val;
+	struct arg *link;
+};
+static struct arg *args, **argtail = &args;
+
 static int nreg, nblock, nlocal;
 static int terminated;		/* current basic block has its terminator */
 static char *rettype;		/* LLVM return type of the current function */
@@ -60,15 +67,20 @@ static void unsupported(Node p) {
 	error("llvm back end: unsupported operator `%s'\n", opname(p->op));
 }
 
-/* inst - emit one instruction, opening a new basic block if needed */
-static void inst(const char *fmt, ...) {
-	va_list ap;
-
+/* startline - start an instruction, opening a new basic block if needed */
+static void startline(void) {
 	if (terminated) {
 		print("b%d:\n", ++nblock);
 		terminated = 0;
 	}
 	print("  ");
+}
+
+/* inst - emit one instruction */
+static void inst(const char *fmt, ...) {
+	va_list ap;
+
+	startline();
 	va_start(ap, fmt);
 	vfprint(stdout, NULL, fmt, ap);
 	va_end(ap);
@@ -232,7 +244,7 @@ static void emitalloca(Symbol p) {
 		p->type->align);
 }
 
-static char *nodeval(Node);
+static char *nodeval(Node), *emitcall(Node);
 
 /* ptroffset - the integer node k as an i64 byte offset, negated if neg */
 static char *ptroffset(Node k, int neg) {
@@ -379,12 +391,65 @@ static char *nodeval(Node p) {
 				inst("%s = xor %s %s, -1", v, optypestr(p->op), a);
 		}
 		break;
+	case CALL:
+		if (optype(p->op) == B) {	/* wants_callb=0: not expected */
+			unsupported(p);
+			return "undef";
+		}
+		v = emitcall(p);
+		break;
 	default:
 		unsupported(p);
 		return "undef";
 	}
 	setval(p, v);
 	return v;
+}
+
+/*
+ * emitcall - emit the call p, taking the arguments listed since the
+ * previous call.  Calls inside arguments are hoisted by the front end,
+ * so they are complete before the first ARG of this call.
+ */
+static char *emitcall(Node p) {
+	Type fty = p->syms[0]->type, rty = freturn(fty);
+	char *f = nodeval(p->kids[0]), *v = NULL, *rt = optypestr(p->op);
+	struct arg *a;
+	int narrow = 0;
+
+	if (fty->u.f.proto == NULL || fty->u.f.oldstyle || variadic(fty)) {
+		error("llvm back end: calls to functions without a prototype or with variable arguments are not supported yet\n");
+		args = NULL;
+		argtail = &args;
+		return "undef";
+	}
+	if (optype(p->op) != V && (isint(rty) || isenum(rty))
+	&& rty->size < opsize(p->op)) {
+		/* the upper bits of a char or short result are undefined */
+		rt = typestr(rty);
+		narrow = 1;
+	}
+	if (optype(p->op) != V)
+		v = newreg();
+	startline();
+	if (v)
+		print("%s = ", v);
+	print("call %s (", rt);
+	for (a = args; a; a = a->link)
+		print("%s%s", a == args ? "" : ", ", a->type);
+	print(") %s(", f);
+	for (a = args; a; a = a->link)
+		print("%s%s %s", a == args ? "" : ", ", a->type, a->val);
+	print(")\n");
+	args = NULL;
+	argtail = &args;
+	if (narrow) {
+		char *w = newreg();
+		inst("%s = %s %s %s to %s", w, isunsigned(rty) ? "zext" : "sext",
+			rt, v, optypestr(p->op));
+		v = w;
+	}
+	return v ? v : "";
 }
 
 /* cmppred - icmp predicate for the comparison op */
@@ -454,6 +519,22 @@ static void emitnode(Node p) {
 			inst("store %s %s, ptr %%retval", optypestr(p->op),
 				nodeval(p->kids[0]));
 		break;
+	case ARG:
+		if (optype(p->op) == B) {	/* wants_argb=0: not expected */
+			unsupported(p);
+			break;
+		}
+		{
+			struct arg *a;
+			NEW(a, FUNC);
+			a->type = optypestr(p->op);
+			a->val = nodeval(p->kids[0]);
+			a->link = NULL;
+			*argtail = a;
+			argtail = &a->link;
+		}
+		break;
+	case CALL:
 	case INDIR:
 		(void)nodeval(p);
 		break;
@@ -637,6 +718,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	flushglobal();
 	infunc = 1;
 	memset(nodevals, 0, sizeof nodevals);
+	args = NULL;
+	argtail = &args;
 	laddrs = NULL;
 	ladtail = &laddrs;
 	nreg = nblock = 0;
