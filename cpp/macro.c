@@ -356,6 +356,10 @@ substargs(Nlist *np, Tokenrow *rtr, Tokenrow **atr)
 			} else {
 				copytokenrow(&tatr, atr[argno]);
 				expandrow(&tatr, "<macro>");
+				/* a ## made while expanding the argument is not an operator */
+				for (tp = tatr.bp; tp < tatr.lp; tp++)
+					if (tp->type == DSHARP)
+						tp->type = DSHARP1;
 				insertrow(rtr, 1, &tatr);
 				dofree(tatr.bp);
 			}
