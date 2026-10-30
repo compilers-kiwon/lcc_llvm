@@ -111,6 +111,22 @@ static char *optypestr(int op) {
 	return NULL;
 }
 
+/* intop - LLVM instruction for the integer binary operator op */
+static char *intop(int op) {
+	switch (generic(op)) {
+	case ADD:  return "add";
+	case SUB:  return "sub";
+	case MUL:  return "mul";
+	case DIV:  return optype(op) == U ? "udiv" : "sdiv";
+	case MOD:  return optype(op) == U ? "urem" : "srem";
+	case BAND: return "and";
+	case BOR:  return "or";
+	case BXOR: return "xor";
+	}
+	assert(0);
+	return NULL;
+}
+
 /* typestr - LLVM type for objects of type ty */
 static char *typestr(Type ty) {
 	ty = unqual(ty);
@@ -238,6 +254,32 @@ static char *nodeval(Node p) {
 			char *a = nodeval(p->kids[0]);
 			v = newreg();
 			inst("%s = load %s, ptr %s", v, optypestr(p->op), a);
+		}
+		break;
+	case ADD: case SUB: case MUL: case DIV: case MOD:
+	case BAND: case BOR: case BXOR:
+		if (optype(p->op) != I && optype(p->op) != U) {
+			unsupported(p);
+			return "undef";
+		}
+		{
+			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
+			v = newreg();
+			inst("%s = %s %s %s, %s", v, intop(p->op), optypestr(p->op), a, b);
+		}
+		break;
+	case NEG: case BCOM:
+		if (optype(p->op) != I && optype(p->op) != U) {
+			unsupported(p);
+			return "undef";
+		}
+		{
+			char *a = nodeval(p->kids[0]);
+			v = newreg();
+			if (generic(p->op) == NEG)
+				inst("%s = sub %s 0, %s", v, optypestr(p->op), a);
+			else
+				inst("%s = xor %s %s, -1", v, optypestr(p->op), a);
 		}
 		break;
 	default:
