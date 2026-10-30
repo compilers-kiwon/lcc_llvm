@@ -8,6 +8,9 @@
 #                     and compiler messages with NAME.2bk, taken from
 #                     llvm/x86_64-linux/tst if there, else x86/linux/tst;
 #                     without NAME.1bk only the messages are compared
+#   unit              tst/llvm/NAME.c compiled by lcc and linked with
+#                     tst/llvm/NAME-drv.c compiled by clang; the driver
+#                     checks the results and must exit with 0
 #   c-testsuite DIR   DIR/tests/single-exec/*.c tagged c89; stdout+stderr
 #                     compared with NAME.c.expected, exit status must be 0
 #   torture DIR       DIR/*.c and DIR/ieee/*.c of gcc.c-torture/execute;
@@ -47,7 +50,7 @@ done
 suite=$1
 [ $# -gt 0 ] && shift
 case "$suite" in
-lcc)	dir= ;;
+lcc|unit) dir= ;;
 c-testsuite|torture|llvm-bench)
 	dir=$1
 	if [ -z "$dir" -o ! -d "$dir" ]; then
@@ -198,6 +201,23 @@ lcc)
 			why="${why:+$why; }messages differ from $out2"
 		fi
 		if [ -n "$why" ]; then report FAIL $n "$why"; else report PASS $n; fi
+	done ;;
+unit)
+	for src in tst/llvm/*.c; do
+		case $src in *-drv.c) continue ;; esac
+		n=`basename $src .c`; selected $n || continue
+		if ! timeout 300 $LCC -c -o $T/$n.o $src >$T/$n.cerr 2>&1; then
+			report CFAIL $n "`grep -v -e 'Unknown preprocessor control' -e ': warning: ' $T/$n.cerr | head -1`"
+			continue
+		fi
+		if ! clang -O0 -fwrapv -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS >$T/$n.lerr 2>&1; then
+			report CFAIL $n "driver: `head -1 $T/$n.lerr`"
+			continue
+		fi
+		execute $n /dev/null 60
+		if [ $status = 124 ]; then report TIMEOUT $n
+		elif [ $status != 0 ]; then report FAIL $n "`tail -1 $T/$n.out`"
+		else report PASS $n "`tail -1 $T/$n.out`"; fi
 	done ;;
 c-testsuite)
 	for src in $dir/tests/single-exec/*.c; do
