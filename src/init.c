@@ -224,6 +224,11 @@ Type initializer(Type ty, int lev) {
 		error("cannot initialize undefined `%t'\n", ty);
 		skipto(';', follow);
 		return ty;
+	} else if ((isunion(ty) || isstruct(ty)) && ty->u.sym->u.s.flist == NULL) {
+		static char follow[] = { CHAR, STATIC, 0 };
+		error("cannot initialize `%t', which has no named fields\n", ty);
+		skipto(';', follow);
+		return ty;
 	} else if (isunion(ty)) {
 		if (t == '{') {
 			t = gettok();
