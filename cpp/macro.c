@@ -171,6 +171,25 @@ expandrow(Tokenrow *trp, char *flag)
 }
 
 /*
+ * If token tp, which is about to be replaced by row trp, was preceded by
+ * white space, give the first token of trp real white space, so that
+ * it survives # and the output.
+ */
+static void
+keepspace(Token *tp, Tokenrow *trp)
+{
+	if (tp->wslen && trp->lp > trp->bp) {
+		if (trp->bp->wslen == 0) {
+			uchar *tt = newstring(trp->bp->t, trp->bp->len, 1);
+			*tt++ = ' ';
+			trp->bp->t = tt;
+			trp->bp->wslen = 1;
+		}
+		trp->bp->flag &= ~XPWS;	/* not just a separator */
+	}
+}
+
+/*
  * Expand the macro whose name is np, at token trp->tp, in the tokenrow.
  * Return trp->tp at the first token next to be expanded
  * (ordinarily the beginning of the expansion)
@@ -215,6 +234,7 @@ expand(Tokenrow *trp, Nlist *np)
 				tp->hideset = unionhideset(tp->hideset, hs);
 		}
 	}
+	keepspace(trp->tp, &ntr);	/* white space before the macro name */
 	ntr.tp = ntr.bp;
 	insertrow(trp, ntokc, &ntr);
 	trp->tp -= rowlen(&ntr);
@@ -351,8 +371,12 @@ substargs(Nlist *np, Tokenrow *rtr, Tokenrow **atr)
 					pmr.lp = &pm + 1;
 					pmr.max = 1;
 					insertrow(rtr, 1, &pmr);
-				} else
-					insertrow(rtr, 1, atr[argno]);
+				} else {
+					copytokenrow(&tatr, atr[argno]);
+					keepspace(rtr->tp, &tatr);
+					insertrow(rtr, 1, &tatr);
+					dofree(tatr.bp);
+				}
 			} else {
 				copytokenrow(&tatr, atr[argno]);
 				expandrow(&tatr, "<macro>");
@@ -360,6 +384,7 @@ substargs(Nlist *np, Tokenrow *rtr, Tokenrow **atr)
 				for (tp = tatr.bp; tp < tatr.lp; tp++)
 					if (tp->type == DSHARP)
 						tp->type = DSHARP1;
+				keepspace(rtr->tp, &tatr);
 				insertrow(rtr, 1, &tatr);
 				dofree(tatr.bp);
 			}
