@@ -662,7 +662,18 @@ Tree field(Tree p, const char *name) {
 		p = simplify(ADD+P, ty, p, consttree(q->offset, signedptr));
 
 		if (q->lsb) {
-			p = tree(FIELD, ty->type, rvalue(p), NULL);
+			Type fty = ty->type;
+			/* an unsigned bit field narrower than int promotes to int
+			   (C89 3.2.1.1); dag.c extracts it by its declared type */
+			if (isunsigned(fty) && fieldsize(q) < 8*inttype->size) {
+				Type uty = fty;
+				fty = inttype;
+				if (isconst(uty))
+					fty = qual(CONST, fty);
+				if (isvolatile(uty))
+					fty = qual(VOLATILE, fty);
+			}
+			p = tree(FIELD, fty, rvalue(p), NULL);
 			p->u.field = q;
 		} else if (!isarray(q->type))
 			p = rvalue(p);

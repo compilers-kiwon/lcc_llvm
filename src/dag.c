@@ -353,15 +353,18 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      else
 		      	p = node(tp->op == INDIR+B ? tp->op : op, l, NULL, NULL); } break;
 	case FIELD: { Tree q = tp->kids[0];
-		      if (tp->type == inttype) {
+		      if (unqual(tp->u.field->type) == inttype) {	/* signed */
 		      	long n = fieldleft(tp->u.field);
 		      	q = shtree(RSH,
 		      		shtree(LSH, q, cnsttree(inttype, n)),
 		      		cnsttree(inttype, n + fieldright(tp->u.field)));
-		      } else if (fieldsize(tp->u.field) < 8*tp->u.field->type->size)
+		      } else if (fieldsize(tp->u.field) < 8*tp->u.field->type->size) {
 		      	q = bittree(BAND,
 		      		shtree(RSH, q, cnsttree(inttype, (long)fieldright(tp->u.field))),
 		      		cnsttree(unsignedtype, (unsigned long)fieldmask(tp->u.field)));
+		      	if (unqual(tp->type) == inttype)	/* promoted, see field() */
+		      		q = cast(q, inttype);
+		      }
 		      assert(tlab == 0 && flab == 0);
 		      p = listnodes(q, 0, 0); } break;
 	case ADDRG:
