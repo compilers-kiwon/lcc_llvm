@@ -291,6 +291,31 @@ static char *nodeval(Node p) {
 				optypestr(p->op), a, b);
 		}
 		break;
+	case CVI: case CVU: case CVP:
+		if (optype(p->op) == F) {
+			unsupported(p);
+			return "undef";
+		}
+		{
+			Node k = p->kids[0];
+			char *a = nodeval(k), *to = optypestr(p->op);
+			int from = opsize(k->op), size = opsize(p->op);
+
+			assert(from == p->syms[0]->u.c.v.i);	/* source size */
+			if (generic(p->op) == CVP || optype(p->op) == P) {
+				v = newreg();
+				inst("%s = %s %s %s to %s", v, optype(p->op) == P
+					? "inttoptr" : "ptrtoint", optypestr(k->op), a, to);
+			} else if (from == size)	/* signedness only */
+				v = a;
+			else {
+				v = newreg();
+				inst("%s = %s %s %s to %s", v, from > size ? "trunc"
+					: generic(p->op) == CVI ? "sext" : "zext",
+					optypestr(k->op), a, to);
+			}
+		}
+		break;
 	case NEG: case BCOM:
 		if (optype(p->op) != I && optype(p->op) != U) {
 			unsupported(p);
