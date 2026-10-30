@@ -268,6 +268,29 @@ static char *nodeval(Node p) {
 			inst("%s = %s %s %s, %s", v, intop(p->op), optypestr(p->op), a, b);
 		}
 		break;
+	case LSH: case RSH:
+		if (optype(p->op) != I && optype(p->op) != U) {
+			unsupported(p);
+			return "undef";
+		}
+		{
+			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
+			Node k = p->kids[1];
+
+			/* the count is an int; LLVM wants it as wide as a */
+			if (opsize(k->op) != opsize(p->op) && generic(k->op) != CNST) {
+				char *c = newreg();
+				inst("%s = %s %s %s to %s", c,
+					opsize(k->op) < opsize(p->op) ? "zext" : "trunc",
+					optypestr(k->op), b, optypestr(p->op));
+				b = c;
+			}
+			v = newreg();
+			inst("%s = %s %s %s, %s", v, generic(p->op) == LSH ? "shl"
+				: optype(p->op) == U ? "lshr" : "ashr",
+				optypestr(p->op), a, b);
+		}
+		break;
 	case NEG: case BCOM:
 		if (optype(p->op) != I && optype(p->op) != U) {
 			unsupported(p);
