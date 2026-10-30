@@ -232,6 +232,37 @@ static void emitalloca(Symbol p) {
 		p->type->align);
 }
 
+static char *nodeval(Node);
+
+/* ptroffset - the integer node k as an i64 byte offset, negated if neg */
+static char *ptroffset(Node k, int neg) {
+	char *v;
+
+	if (generic(k->op) == CNST) {
+		Value c = k->syms[0]->u.c.v;
+		long n;
+
+		if (optype(k->op) == U)		/* zero-extended */
+			n = opsize(k->op) < 8 ? (long)(c.u & ones(8*opsize(k->op))) : (long)c.u;
+		else				/* sign-extended */
+			n = atol(intstr(c.u, opsize(k->op)));
+		return stringf("%D", neg ? -n : n);
+	}
+	v = nodeval(k);
+	if (opsize(k->op) < 8) {
+		char *w = newreg();
+		inst("%s = %s %s %s to i64", w, optype(k->op) == U ? "zext" : "sext",
+			optypestr(k->op), v);
+		v = w;
+	}
+	if (neg) {
+		char *w = newreg();
+		inst("%s = sub i64 0, %s", w, v);
+		v = w;
+	}
+	return v;
+}
+
 /* nodeval - return the LLVM value of node p, emitting code for it */
 static char *nodeval(Node p) {
 	char *v = lookupval(p);
@@ -256,7 +287,25 @@ static char *nodeval(Node p) {
 			inst("%s = load %s, ptr %s", v, optypestr(p->op), a);
 		}
 		break;
-	case ADD: case SUB: case MUL: case DIV: case MOD:
+	case ADD: case SUB:
+		if (optype(p->op) == P) {	/* the pointer may be either kid */
+			Node ptr = p->kids[0], k = p->kids[1];
+			char *a, *off;
+
+			if (optype(ptr->op) != P) {
+				assert(generic(p->op) == ADD);
+				ptr = p->kids[1];
+				k = p->kids[0];
+			}
+			assert(optype(ptr->op) == P && optype(k->op) != P);
+			a = nodeval(ptr);
+			off = ptroffset(k, generic(p->op) == SUB);
+			v = newreg();
+			inst("%s = getelementptr i8, ptr %s, i64 %s", v, a, off);
+			break;
+		}
+		/* fall through */
+	case MUL: case DIV: case MOD:
 	case BAND: case BOR: case BXOR:
 		if (optype(p->op) != I && optype(p->op) != U) {
 			unsupported(p);
