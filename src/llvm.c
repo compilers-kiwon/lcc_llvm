@@ -410,18 +410,25 @@ static char *nodeval(Node p) {
  * emitcall - emit the call p, taking the arguments listed since the
  * previous call.  Calls inside arguments are hoisted by the front end,
  * so they are complete before the first ARG of this call.
+ *
+ * A function without a prototype is called as (...), and a variadic one
+ * as (fixed, ...).  The arguments have their default promotions, and
+ * SysV passes them in the same registers either way; a variadic call
+ * also sets %al, which a callee with variable arguments needs.
  */
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
 	char *f = nodeval(p->kids[0]), *v = NULL, *rt = optypestr(p->op);
 	struct arg *a;
-	int narrow = 0;
+	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
 
-	if (fty->u.f.proto == NULL || fty->u.f.oldstyle || variadic(fty)) {
-		error("llvm back end: calls to functions without a prototype or with variable arguments are not supported yet\n");
-		args = NULL;
-		argtail = &args;
-		return "undef";
+	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
+		nfixed = 0;
+	else if (variadic(fty)) {
+		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
+			;	/* proto ends with voidtype for ... */
+		if (isstruct(rty))	/* the hidden result address */
+			nfixed++;
 	}
 	if (optype(p->op) != V && (isint(rty) || isenum(rty))
 	&& rty->size < opsize(p->op)) {
@@ -435,8 +442,10 @@ static char *emitcall(Node p) {
 	if (v)
 		print("%s = ", v);
 	print("call %s (", rt);
-	for (a = args; a; a = a->link)
-		print("%s%s", a == args ? "" : ", ", a->type);
+	for (i = 0, a = args; a && (nfixed < 0 || i < nfixed); i++, a = a->link)
+		print("%s%s", i ? ", " : "", a->type);
+	if (nfixed >= 0)
+		print("%s...", i ? ", " : "");
 	print(") %s(", f);
 	for (a = args; a; a = a->link)
 		print("%s%s %s", a == args ? "" : ", ", a->type, a->val);
