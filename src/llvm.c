@@ -387,9 +387,44 @@ static char *nodeval(Node p) {
 	return v;
 }
 
+/* cmppred - icmp predicate for the comparison op */
+static char *cmppred(int op) {
+	int u = optype(op) == U;
+
+	switch (generic(op)) {
+	case EQ: return "eq";
+	case NE: return "ne";
+	case LT: return u ? "ult" : "slt";
+	case LE: return u ? "ule" : "sle";
+	case GT: return u ? "ugt" : "sgt";
+	case GE: return u ? "uge" : "sge";
+	}
+	assert(0);
+	return NULL;
+}
+
 /* emitnode - emit code for the root node p */
 static void emitnode(Node p) {
 	switch (generic(p->op)) {
+	case EQ: case NE: case LT: case LE: case GT: case GE:
+		/* jump to syms[0] if true; else fall into a new block */
+		if (optype(p->op) == F) {
+			unsupported(p);
+			break;
+		}
+		{
+			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
+			char *c = newreg(), *fall = stringf("b%d", ++nblock);
+
+			/* pointers are compared as integers: the front end adds CVPU */
+			assert(optype(p->kids[0]->op) != P && optype(p->kids[1]->op) != P);
+			inst("%s = icmp %s %s %s, %s", c, cmppred(p->op),
+				optypestr(p->op), a, b);
+			inst("br i1 %s, label %%%s, label %%%s", c,
+				gname(p->syms[0]), fall);
+			print("%s:\n", fall);
+		}
+		break;
 	case LABEL:
 		if (!terminated)
 			print("  br label %%%s\n", gname(p->syms[0]));
