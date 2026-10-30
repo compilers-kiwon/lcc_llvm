@@ -246,7 +246,9 @@ gatherargs(Tokenrow *trp, Tokenrow **atr, int *narg)
 			gettokens(trp, 0);
 			if ((trp->lp-1)->type==END) {
 				trp->lp -= 1;
-				trp->tp -= ntok;
+				/* not a call: resume just after the name,
+				   as when a non-( token is found below */
+				trp->tp -= ntok - 1;
 				return ntok;
 			}
 		}
