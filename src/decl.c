@@ -875,7 +875,10 @@ void compound(int loop, struct swtch *swp, int lev) {
 		if (cp->kind != Jump) {
 			if (freturn(cfunc->type) != voidtype) {
 				warning("missing return value\n");
-				retcode(cnsttree(inttype, 0L));
+				if (isstruct(freturn(cfunc->type)))
+					retcode(NULL);	/* no int 0 to convert */
+				else
+					retcode(cnsttree(inttype, 0L));
 			} else
 				retcode(NULL);
 		}
