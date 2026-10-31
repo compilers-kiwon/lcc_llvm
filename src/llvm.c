@@ -319,6 +319,15 @@ static char *nodeval(Node p) {
 		/* fall through */
 	case MUL: case DIV: case MOD:
 	case BAND: case BOR: case BXOR:
+		if (optype(p->op) == F) {
+			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
+			v = newreg();
+			inst("%s = f%s %s %s, %s", v, generic(p->op) == ADD ? "add"
+				: generic(p->op) == SUB ? "sub"
+				: generic(p->op) == MUL ? "mul" : "div",
+				optypestr(p->op), a, b);
+			break;
+		}
 		if (optype(p->op) != I && optype(p->op) != U) {
 			unsupported(p);
 			return "undef";
@@ -378,6 +387,12 @@ static char *nodeval(Node p) {
 		}
 		break;
 	case NEG: case BCOM:
+		if (optype(p->op) == F) {
+			char *a = nodeval(p->kids[0]);
+			v = newreg();
+			inst("%s = fneg %s %s", v, optypestr(p->op), a);
+			break;
+		}
 		if (optype(p->op) != I && optype(p->op) != U) {
 			unsupported(p);
 			return "undef";

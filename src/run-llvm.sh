@@ -210,7 +210,7 @@ unit)
 			report CFAIL $n "`grep -v -e 'Unknown preprocessor control' -e ': warning: ' $T/$n.cerr | head -1`"
 			continue
 		fi
-		if ! clang -O0 -fwrapv -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS >$T/$n.lerr 2>&1; then
+		if ! clang -O0 -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS >$T/$n.lerr 2>&1; then
 			report CFAIL $n "driver: `head -1 $T/$n.lerr`"
 			continue
 		fi
