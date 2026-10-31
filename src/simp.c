@@ -241,8 +241,9 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 		case CVP+P:
 			xcvtcnst(P,l->u.v.p,ty,p,l->u.v.p);
 			break;
-		case CVI+U:
-			xcvtcnst(I,l->u.v.i,ty,u,((unsigned long)l->u.v.i)&ones(8*ty->size));
+		case CVI+U:	/* modular, so check the converted value, not the
+				   signed one, which a 64-bit host long sees as huge */
+			xcvtcnst(I,((unsigned long)l->u.v.i)&ones(8*ty->size),ty,u,((unsigned long)l->u.v.i)&ones(8*ty->size));
 			break;
 		case CVU+U:
 			xcvtcnst(U,l->u.v.u,ty,u,l->u.v.u&ones(8*ty->size));
