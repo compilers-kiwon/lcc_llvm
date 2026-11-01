@@ -569,7 +569,22 @@ Tree cast(Tree p, Type type) {
 					p = simplify(CVI, dst, p, NULL);
 					break;
 				case UNSIGNED:
-					if (isfloat(dst)) {
+					if (isfloat(dst) && src->size >= longdouble->size) {
+						/* 2*(u>>1) + (u&1) below rounds twice when u
+						   has more bits than long double has digits.
+						   Convert u directly if it fits the signed type;
+						   else halve it, keeping the lost bit so that
+						   the one rounding is right, and double it */
+						Type ssrc = signedint(src);
+						Tree max = cnsttree(src, (unsigned long)ssrc->u.sym->u.limits.max.i);
+						Tree half = simplify(BOR, src,
+							simplify(RSH, src, p, consttree(1, inttype)),
+							simplify(BAND, src, p, consttree(1, unsignedtype)));
+						p = condtree(simplify(LE, src, p, max),
+							simplify(CVI, dst, simplify(CVU, ssrc, p, NULL), NULL),
+							(*optree['*'])(MUL, cnsttree(dst, (long double)2.0),
+								simplify(CVI, dst, simplify(CVU, ssrc, half, NULL), NULL)));
+					} else if (isfloat(dst)) {
 						Type ssrc = signedint(src);
 						Tree two = cnsttree(longdouble, (long double)2.0);
 						p = (*optree['+'])(ADD,
