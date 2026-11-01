@@ -406,6 +406,39 @@ static Tree primary(void) {
 			p = cnsttree(inttype, 0L);
 		}
 		break;
+	case VA_ARG:
+		/*
+		 * __builtin_va_arg(ap, type) is *__builtin_va_arg(ap), where
+		 * the function returns type *; the back end implements it and
+		 * finds the type in the function's type.
+		 */
+		{
+			Symbol f;
+			Tree ap;
+			Type ty = inttype;
+			t = gettok();
+			expect('(');
+			ap = pointer(expr1(','));
+			if (!isptr(ap->type))
+				error("invalid va_list argument to `%k'\n", VA_ARG);
+			if (istypename(t, tsym)) {
+				ty = typename();
+				if (isfunc(ty) || isarray(ty) || ty->size == 0)
+					error("invalid type argument `%t' to `%k'\n", ty, VA_ARG);
+			} else
+				error("missing type argument to `%k'\n", VA_ARG);
+			if (t != ')')
+				expect(')');
+			NEW0(f, PERM);
+			f->name = string("__builtin_va_arg");
+			f->sclass = EXTERN;
+			f->scope = GLOBAL;
+			f->type = ftype(ptr(ty), ptr(voidtype), NULL);
+			(*IR->defsymbol)(f);
+			f->defined = 1;
+			p = rvalue(vcall(f, NULL, cast(ap, voidptype), NULL));
+		}
+		break;
 	default:
 		error("illegal expression\n");
 			p = cnsttree(inttype, 0L);

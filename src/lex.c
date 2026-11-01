@@ -684,6 +684,11 @@ int gettok(void) {
 				cp = rcp + 9;
 				return FIRSTARG;
 			}
+			if (strncmp((char *)rcp, "_builtin_va_arg", 15) == 0
+			&& !(map[rcp[15]]&(DIGIT|LETTER))) {
+				cp = rcp + 15;
+				return VA_ARG;
+			}
 			goto id;
 		default:
 			if ((map[cp[-1]]&BLANK) == 0)
