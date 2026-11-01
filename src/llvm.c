@@ -60,6 +60,7 @@ static struct arg *args, **argtail = &args;
 static int nreg, nblock, nlocal;
 static int terminated;		/* current basic block has its terminator */
 static char *rettype;		/* LLVM return type of the current function */
+static int usedmemcpy;		/* llvm.memcpy needs a declaration */
 
 static char *gname(Symbol);
 
@@ -289,9 +290,9 @@ static char *nodeval(Node p) {
 		v = gname(p->syms[0]);
 		break;
 	case INDIR:
-		if (optype(p->op) == B) {
-			unsupported(p);
-			return "undef";
+		if (optype(p->op) == B) {	/* a struct is its address */
+			v = nodeval(p->kids[0]);
+			break;
 		}
 		{
 			char *a = nodeval(p->kids[0]);
@@ -573,8 +574,14 @@ static void emitnode(Node p) {
 		terminated = 1;
 		break;
 	case ASGN:
-		if (optype(p->op) == B) {
-			unsupported(p);
+		if (optype(p->op) == B) {	/* kids[1] is INDIRB */
+			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
+			int align = p->syms[1]->u.c.v.i;
+			assert(generic(p->kids[1]->op) == INDIR);
+			inst("call void @llvm.memcpy.p0.p0.i64(ptr align %d %s, "
+				"ptr align %d %s, i64 %D, i1 false)", align, a, align, b,
+				p->syms[0]->u.c.v.i);
+			usedmemcpy = 1;
 			break;
 		}
 		{
@@ -914,6 +921,8 @@ static void I(progbeg)(int argc, char *argv[]) {
 /* progend - end of program */
 static void I(progend)(void) {
 	flushglobal();
+	if (usedmemcpy)
+		print("\ndeclare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n");
 }
 
 static void I(segment)(int s) {}
