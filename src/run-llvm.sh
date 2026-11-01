@@ -20,7 +20,8 @@
 #                     "exit N" compared with NAME.reference_output
 #
 # Programs of the external suites are used only if they are C89: no GNU
-# keywords, GCC predefined macros or #pragma, accepted by clang and gcc in
+# keywords, GCC predefined macros or #pragma, also in the files they
+# include from their directory, accepted by clang and gcc in
 # strict C89 mode, no implicitly declared function that may not return int,
 # and not on the exclusion list below.  The test files are not copied into
 # this repository; pass the directory of a checkout instead.
@@ -80,21 +81,36 @@ excluded() {
 	fp-cmp-[123].c)	echo "signal handler of an incompatible type" ;;
 	pr15262-1.c)	echo "implicitly declared malloc assigned to a pointer" ;;
 	enum-3.c)	echo "relies on an enum type being compatible with int" ;;
-	pr71626-2.c)	echo "includes pr71626-1.c, which uses GNU extensions" ;;
 	*)		return 1 ;;
 	esac
 	return 0
 }
 
+# localsrc file - file and the files it includes with "..." from its
+# directory, directly or not; some files include themselves
+localsrc() {
+	dir=`dirname $1` todo=$1 seen=
+	while [ -n "$todo" ]; do
+		set -- $todo; f=$1; shift; todo="$*"
+		case " $seen " in *" $f "*) continue ;; esac
+		seen="$seen $f"
+		for i in `sed -n 's/^[ 	]*#[ 	]*include[ 	]*"\([^"]*\)".*/\1/p' $f`; do
+			[ -f "$dir/$i" ] && todo="$todo $dir/$i"
+		done
+	done
+	echo $seen
+}
+
 isc89() {
 	excluded `basename $1` >/dev/null && return 1
-	grep -E "$GNUKW" "$1" >/dev/null && return 1
-	if grep -oE '\b__[A-Z][A-Z0-9_]*__\b' "$1" |
+	srcs=`localsrc $1`
+	grep -E "$GNUKW" $srcs >/dev/null && return 1
+	if grep -ohE '\b__[A-Z][A-Z0-9_]*__\b' $srcs |
 	   grep -vE '^__(STDC|FILE|LINE|DATE|TIME)__$' >/dev/null; then
 		return 1
 	fi
-	grep -E '^[ 	]*#[ 	]*pragma' "$1" >/dev/null && return 1
-	grep -w va_copy "$1" >/dev/null && return 1	# C99
+	grep -E '^[ 	]*#[ 	]*pragma' $srcs >/dev/null && return 1
+	grep -w va_copy $srcs >/dev/null && return 1	# C99
 	clang $CLANG89 -I`dirname $1` "$1" >/dev/null 2>&1 || return 1
 	gcc $GCC89 -I`dirname $1` "$1" >/dev/null 2>&1 || return 1
 	# calls through an implicit int declaration are fine only if the
