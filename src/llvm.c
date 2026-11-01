@@ -61,6 +61,8 @@ static int nreg, nblock, nlocal;
 static int terminated;		/* current basic block has its terminator */
 static char *rettype;		/* LLVM return type of the current function */
 static int usedmemcpy;		/* llvm.memcpy needs a declaration */
+static char *fname;		/* LLVM name of the current function */
+static Node emitting;		/* the forest being emitted */
 
 static char *gname(Symbol);
 
@@ -537,6 +539,38 @@ static char *fcmppred(Node p) {
 	return NULL;
 }
 
+/* equated - the label that p was made equal to, as in dag.c */
+static Symbol equated(Symbol p) {
+	while (p->u.l.equatedto)
+		p = p->u.l.equatedto;
+	return p;
+}
+
+/*
+ * emitindirect - emit the indirect jump p through a switch table.  The
+ * front end makes one only for a switch: the code list entry right
+ * after the jump's has the table, whose labels are the destinations.
+ */
+static void emitindirect(Node p) {
+	char *a = nodeval(p->kids[0]);
+	Code cp;
+	int i;
+
+	for (cp = codehead.next; cp; cp = cp->next)
+		if (cp->kind == Gen && cp->u.forest == emitting)
+			break;
+	if (cp == NULL || (cp = cp->next) == NULL || cp->kind != Switch) {
+		unsupported(p);
+		return;
+	}
+	startline();
+	print("indirectbr ptr %s, [label %%%s", a,
+		gname(equated(cp->u.swtch.deflab)));
+	for (i = 0; i < cp->u.swtch.size; i++)
+		print(", label %%%s", gname(equated(cp->u.swtch.labels[i])));
+	print("]\n");
+}
+
 /* emitnode - emit code for the root node p */
 static void emitnode(Node p) {
 	switch (generic(p->op)) {
@@ -566,11 +600,10 @@ static void emitnode(Node p) {
 		terminated = 0;
 		break;
 	case JUMP:
-		if (specific(p->kids[0]->op) != ADDRG+P) {
-			unsupported(p);
-			break;
-		}
-		inst("br label %%%s", gname(p->kids[0]->syms[0]));
+		if (specific(p->kids[0]->op) == ADDRG+P)
+			inst("br label %%%s", gname(p->kids[0]->syms[0]));
+		else
+			emitindirect(p);
 		terminated = 1;
 		break;
 	case ASGN:
@@ -730,8 +763,10 @@ static void I(blockend)(Env *e) {}
 
 /* defaddress - initialize an address */
 static void I(defaddress)(Symbol p) {
-	if (p->scope == LABELS) {
-		error("llvm back end: label addresses are not supported\n");
+	if (p->scope == LABELS) {	/* in a switch table */
+		assert(infunc);
+		newitem(Kaddr)->val = stringf("blockaddress(%s, %%%s)",
+			fname, gname(p));
 		return;
 	}
 	newitem(Kaddr)->val = gname(p);
@@ -778,7 +813,7 @@ static void I(defsymbol)(Symbol p) {
 
 /* emit - emit the dags on list p */
 static void I(emit)(Node p) {
-	for ( ; p; p = p->link)
+	for (emitting = p; p; p = p->link)
 		emitnode(p);
 }
 
@@ -800,9 +835,10 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	nreg = nblock = 0;
 	terminated = 0;
 	rettype = rettypestr(f->type);
+	fname = gname(f);
 
 	print("\ndefine %s%s %s(", f->sclass == STATIC ? "internal " : "",
-		rettype, gname(f));
+		rettype, fname);
 	for (i = 0; caller[i]; i++)
 		print("%s%s %%a%d", i ? ", " : "", typestr(caller[i]->type), i);
 	if (variadic(f->type))
