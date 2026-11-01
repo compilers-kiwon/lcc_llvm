@@ -23,9 +23,9 @@ Section s757    returned 0.
 Section s7813   returned 0.
 Section s714    returned 0.
 Section s715    returned 0.
-0 registers assigned to char variables.
-0 registers assigned to pointer variables.
-0 registers assigned to int variables.
+Register count for char is unreliable.
+Register count for pointer is unreliable.
+Register count for int is unreliable.
 Section s81     returned 0.
 Section s84     returned 0.
 char alignment: 1
