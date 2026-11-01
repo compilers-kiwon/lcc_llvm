@@ -361,10 +361,33 @@ static char *nodeval(Node p) {
 				optypestr(p->op), a, b);
 		}
 		break;
+	case CVF:	/* to float or to int; unsigned is built by cast() */
+		{
+			Node k = p->kids[0];
+			char *a = nodeval(k);
+			int from = opsize(k->op), size = opsize(p->op);
+
+			assert(from == p->syms[0]->u.c.v.i);	/* source size */
+			if (optype(p->op) == F && from == size)	/* long double */
+				v = a;
+			else {
+				v = newreg();
+				inst("%s = %s %s %s to %s", v, optype(p->op) == I ? "fptosi"
+					: from < size ? "fpext" : "fptrunc",
+					optypestr(k->op), a, optypestr(p->op));
+			}
+		}
+		break;
 	case CVI: case CVU: case CVP:
-		if (optype(p->op) == F) {
-			unsupported(p);
-			return "undef";
+		if (optype(p->op) == F) {	/* only CVI: cast() splits unsigned */
+			Node k = p->kids[0];
+			char *a = nodeval(k);
+
+			assert(generic(p->op) == CVI);
+			v = newreg();
+			inst("%s = sitofp %s %s to %s", v, optypestr(k->op), a,
+				optypestr(p->op));
+			break;
 		}
 		{
 			Node k = p->kids[0];

@@ -29,8 +29,8 @@ int main(void) {
 	CHK(many(1, 2, s, 4, 5, 6, 7, 8, 9, 10), rmany(1, 2, s, 4, 5, 6, 7, 8, 9, 10), "%ld");
 	CHK(callmany(s), rmany(1, 2, s, 4, 5, 6, 7, 8, 9, 10) - rmany(-1, -2, s + 1, -4, -5, -6, -7, -8, -9, -10), "%ld");
 	CHK(dpass(3.25), 3.25, "%g"); CHK(fpass(0.75f), 0.75f, "%g");
-	CHK(dpick(0, 1.0, 2.0f, 3.0), 1.0, "%g"); CHK(dpick(2, 1.0, 2.0f, -3.5), -3.5, "%g");
-	CHK(fpick(0, 1.5f, 2.0, 3.5f), 1.5f, "%g"); CHK(fpick(1, 1.5f, 2.0, -3.25f), -3.25f, "%g");
+	CHK(dpick(0, 1.0, 2.0f, 3.0), 1.0, "%g"); CHK(dpick(1, 1.0, 2.5f, 3.0), 2.5, "%g"); CHK(dpick(2, 1.0, 2.0f, -3.5), -3.5, "%g");
+	CHK(fpick(0, 1.5f, 2.0, 3.5f), 1.5f, "%g"); CHK(fpick(1, 1.5f, 0.1, 3.5f), (float)0.1, "%g"); CHK(fpick(2, 1.5f, 2.0, -3.25f), -3.25f, "%g");
 	CHK(dcall(9.125), 9.125, "%g");
 	for (i = -5; i <= 5; i++) {
 		CHK(apply(0, i), i + 1, "%d"); CHK(apply(1, i), i * 2, "%d"); CHK(apply(2, i), i * i, "%d");

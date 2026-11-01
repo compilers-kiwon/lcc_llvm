@@ -1,0 +1,37 @@
+/*
+ * Conversions with floating types: signed integers to and from float
+ * and double, unsigned ones (which the front end builds from signed
+ * conversions, rounding once), float to double and back, long double
+ * (the same as double here, so only inside functions), unary minus on float (done in double), and mixed
+ * expressions.  Compiled by lcc; fpconv-drv.c compares the bits.
+ */
+double i2d(int x) { return x; }
+float i2f(int x) { return x; }
+double l2d(long x) { return x; }
+float l2f(long x) { return x; }
+double c2d(char x) { return x; }
+float s2f(short x) { return x; }
+double u2d(unsigned x) { return x; }
+float u2f(unsigned x) { return x; }
+double ul2d(unsigned long x) { return x; }
+float ul2f(unsigned long x) { return x; }
+
+int d2i(double x) { return x; }
+long d2l(double x) { return x; }
+int f2i(float x) { return x; }
+long f2l(float x) { return x; }
+unsigned d2u(double x) { return x; }
+unsigned long d2ul(double x) { return x; }
+unsigned f2u(float x) { return x; }
+unsigned long f2ul(float x) { return x; }
+char d2c(double x) { return x; }
+
+double f2d(float x) { return x; }
+float d2f(double x) { return x; }
+double viald(double x) { long double t; t = x; return t; }	/* no long double across calls: */
+double viald2(double x) { long double t; t = x; return t * 2; }	/* clang's long double differs */
+float fneg(float x) { return -x; }
+
+double mix(float f, double d, int i, long l) { return f * d + i / 2 - l * f; }
+float fmix(float f, int i) { return f * i + 0.5f; }
+long round_down(double x) { return x < 0 ? (long)(x - 0.5) : (long)(x + 0.5); }

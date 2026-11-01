@@ -24,11 +24,10 @@ long many(int a, long b, char *c, int d, long e, int f, int g, long h, int i, lo
 }
 long callmany(char *s) { return many(1, 2, s, 4, 5, 6, 7, 8, 9, 10) - many(-1, -2, s + 1, -4, -5, -6, -7, -8, -9, -10); }
 
-/* floating values are only passed and returned: no conversions yet */
 double dpass(double x) { return x; }
-double dpick(int i, double a, float b, double c) { if (i == 0) return a; return c; }
+double dpick(int i, double a, float b, double c) { if (i == 0) return a; if (i == 1) return b; return c; }
 float fpass(float x) { return x; }
-float fpick(int i, float a, double b, float c) { if (i == 0) return a; return c; }
+float fpick(int i, float a, double b, float c) { if (i == 0) return a; if (i == 1) return b; return c; }
 double dcall(double x) { return dpick(2, dpass(1.5), fpass(2.5f), dpass(x)); }
 
 int add1(int x) { return x + 1; }
