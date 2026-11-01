@@ -4,7 +4,7 @@ static char rcsid[] = "$Id$";
 
 #define SWSIZE 512
 
-#define den(i,j) ((j-buckets[i]+1.0)/(v[j]-v[buckets[i]]+1))
+#define den(i,j) ((j-buckets[i]+1.0)/((double)v[j]-v[buckets[i]]+1))
 
 struct code codehead = { Start };
 Code codelist = &codehead;
