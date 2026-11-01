@@ -492,23 +492,44 @@ static char *cmppred(int op) {
 	return NULL;
 }
 
+/*
+ * fcmppred - fcmp predicate for the floating comparison p.  != is true
+ * for unordered operands (a NaN), the others are false, except when
+ * the front end inverted the comparison to jump on false; it marks
+ * those with syms[1], and then they must be true when unordered.
+ */
+static char *fcmppred(Node p) {
+	int u = p->syms[1] != NULL;
+
+	switch (generic(p->op)) {
+	case EQ: return "oeq";
+	case NE: return "une";
+	case LT: return u ? "ult" : "olt";
+	case LE: return u ? "ule" : "ole";
+	case GT: return u ? "ugt" : "ogt";
+	case GE: return u ? "uge" : "oge";
+	}
+	assert(0);
+	return NULL;
+}
+
 /* emitnode - emit code for the root node p */
 static void emitnode(Node p) {
 	switch (generic(p->op)) {
 	case EQ: case NE: case LT: case LE: case GT: case GE:
 		/* jump to syms[0] if true; else fall into a new block */
-		if (optype(p->op) == F) {
-			unsupported(p);
-			break;
-		}
 		{
 			char *a = nodeval(p->kids[0]), *b = nodeval(p->kids[1]);
 			char *c = newreg(), *fall = stringf("b%d", ++nblock);
 
 			/* pointers are compared as integers: the front end adds CVPU */
 			assert(optype(p->kids[0]->op) != P && optype(p->kids[1]->op) != P);
-			inst("%s = icmp %s %s %s, %s", c, cmppred(p->op),
-				optypestr(p->op), a, b);
+			if (optype(p->op) == F)
+				inst("%s = fcmp %s %s %s, %s", c, fcmppred(p),
+					optypestr(p->op), a, b);
+			else
+				inst("%s = icmp %s %s %s, %s", c, cmppred(p->op),
+					optypestr(p->op), a, b);
 			inst("br i1 %s, label %%%s, label %%%s", c,
 				gname(p->syms[0]), fall);
 			print("%s:\n", fall);
