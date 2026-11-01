@@ -266,6 +266,11 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      	default: assert(0);
 		      	}
 		      	list(newnode(op + opkind(l->op), l, r, findlabel(flab)));
+		      	/* !(a < b) is not a >= b if a or b is a NaN: mark an
+		      	   inverted floating comparison, which must also jump
+		      	   when the operands are unordered */
+		      	if (optype(l->op) == F && op != EQ && op != NE)
+		      		forest->syms[1] = intconst(1);
 		      }
 		      if (forest && forest->syms[0])
 		      	forest->syms[0]->ref++; } break;
