@@ -591,7 +591,13 @@ static char *emitbuiltin(Node p, int b) {
 	char *ap, *v, *slot = vaslot(p);
 	Type ty;
 
-	assert(args && args->link == NULL);
+	if (args == NULL || args->link != NULL) {	/* declared otherwise */
+		error("`%s' takes the va_list as its only argument\n",
+			p->kids[0]->syms[0]->name);
+		args = NULL;
+		argtail = &args;
+		return b == VAARG ? "null" : "";
+	}
 	ap = args->val;
 	args = NULL;
 	argtail = &args;
