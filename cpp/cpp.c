@@ -99,13 +99,13 @@ control(Tokenrow *trp)
 			error(ERROR, "Unidentifiable control line");
 		return;			/* else empty line */
 	}
-	if ((np = lookup(tp, 0))==NULL || (np->flag&ISKW)==0 && !skipping) {
-		error(WARNING, "Unknown preprocessor control %t", tp);
+	if ((np = lookup(tp, 0))==NULL || (np->flag&ISKW)==0) {
+		/* a group being skipped may have any directive */
+		if (!skipping)
+			error(WARNING, "Unknown preprocessor control %t", tp);
 		return;
 	}
 	if (skipping) {
-		if ((np->flag&ISKW)==0)
-			return;
 		switch (np->val) {
 		case KENDIF:
 			if (--ifdepth<skipping)
