@@ -375,6 +375,22 @@ static void emitalloca(Symbol p) {
 static char *nodeval(Node), *emitcall(Node);
 
 /*
+ * returnstwice - whether the function named name can return twice, as
+ * setjmp does; LLVM must know, since locals may change between the
+ * returns.  The names are those that clang knows.
+ */
+static int returnstwice(char *name) {
+	static char *names[] = { "setjmp", "_setjmp", "sigsetjmp",
+		"__sigsetjmp", "savectx", "vfork", "getcontext", NULL };
+	int i;
+
+	for (i = 0; names[i]; i++)
+		if (strcmp(name, names[i]) == 0)
+			return 1;
+	return 0;
+}
+
+/*
  * builtin - which stdarg function the call p is to, or 0.  stdarg.h
  * declares __builtin_va_start and __builtin_va_end, and the front end
  * makes __builtin_va_arg(ap, T) a call to a __builtin_va_arg returning
@@ -895,7 +911,11 @@ static char *emitcall(Node p) {
 	for (a = list; a; a = a->link)
 		print("%s%s%s%s %s", a == list ? "" : ", ", a->type,
 			a->attr ? " " : "", a->attr ? a->attr : "", a->val);
-	print(")\n");
+	print(")");
+	if (specific(p->kids[0]->op) == ADDRG+P
+	&& returnstwice(p->kids[0]->syms[0]->name))
+		print(" returns_twice");
+	print("\n");
 	args = NULL;
 	argtail = &args;
 	if (nres > 0) {	/* store the registers at the result address */
@@ -1423,7 +1443,7 @@ static void I(import)(Symbol p) {
 				print(", ...");
 		} else
 			print("%s...", n ? ", " : "");
-		print(")\n");
+		print(")%s\n", returnstwice(p->name) ? " returns_twice" : "");
 	} else
 		print("%s = external global %s\n", p->x.name, typestr(p->type));
 }
