@@ -175,6 +175,7 @@ enum {
 struct node {
 	short op;
 	short count;
+	char volatil;	/* an INDIR or ASGN of a volatile object */
  	Symbol syms[3];
 	Node kids[2];
 	Node link;

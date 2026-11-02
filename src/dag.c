@@ -322,6 +322,12 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      list(newnode(tp->op == ASGN+B ? tp->op : op, l, r, NULL));
 		      forest->syms[0] = intconst(tp->kids[1]->type->size);
 		      forest->syms[1] = intconst(tp->kids[1]->type->align);
+		      { Tree a = tp->kids[0]->op == FIELD
+		      	? tp->kids[0]->kids[0]->kids[0] : tp->kids[0];
+		        Type ty = isptr(a->type) ? unqual(a->type)->type : a->type;
+		        if (isvolatile(ty)
+		        || (isstruct(ty) && unqual(ty)->u.sym->u.s.vfields))
+		        	forest->volatil = 1; }
 		      if (isaddrop(tp->kids[0]->op)
 		      && !tp->kids[0]->u.sym->computed)
 		      	killnodes(tp->kids[0]->u.sym);
@@ -362,9 +368,10 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      if (isptr(ty))
 		      	ty = unqual(ty)->type;
 		      if (isvolatile(ty)
-		      || (isstruct(ty) && unqual(ty)->u.sym->u.s.vfields))
+		      || (isstruct(ty) && unqual(ty)->u.sym->u.s.vfields)) {
 		      	p = newnode(tp->op == INDIR+B ? tp->op : op, l, NULL, NULL);
-		      else
+		      	p->volatil = 1;
+		      } else
 		      	p = node(tp->op == INDIR+B ? tp->op : op, l, NULL, NULL); } break;
 	case FIELD: { Tree q = tp->kids[0];
 		      if (unqual(tp->u.field->type) == inttype) {	/* signed */
@@ -593,10 +600,12 @@ static Node replace(Node p) {
 		 && p->kids[0]->syms[0]->temporary
 		 && p->kids[0]->syms[0]->u.t.replace)) {
 		p = p->kids[0]->syms[0]->u.t.cse;
-		if (generic(p->op) == INDIR && isaddrop(p->kids[0]->op))
+		if (generic(p->op) == INDIR && isaddrop(p->kids[0]->op)) {
+			int v = p->volatil;
 			p = newnode(p->op, newnode(p->kids[0]->op, NULL, NULL,
 				p->kids[0]->syms[0]), NULL, NULL);
-		else if (generic(p->op) == ADDRG)
+			p->volatil = v;
+		} else if (generic(p->op) == ADDRG)
 			p = newnode(p->op, NULL, NULL, p->syms[0]);
 		else
 			assert(0);
@@ -658,7 +667,9 @@ static Node visit(Node p, int listed) {
 			p->count = 1;
 		}
 		else if (p->op == INDIR+B) {
+			int v = p->volatil;
 			p = newnode(p->op, p->kids[0], NULL, NULL);
+			p->volatil = v;
 			p->count = 1;
 			p->kids[0] = visit(p->kids[0], 0);
 			p->kids[1] = visit(p->kids[1], 0);
