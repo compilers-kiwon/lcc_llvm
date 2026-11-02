@@ -396,7 +396,7 @@ tokval(Token *tp)
 {
 	struct value v;
 	Nlist *np;
-	int i, base, c;
+	int i, base, c, wide;
 	unsigned long n;
 	uchar *p;
 
@@ -456,10 +456,9 @@ tokval(Token *tp)
 	case CCON:
 		n = 0;
 		p = tp->t;
-		if (*p=='L') {
+		wide = *p=='L';	/* its value is the code, as for a char */
+		if (wide)
 			p += 1;
-			error(WARNING, "Wide char constant value undefined");
-		}
 		p += 1;
 		if (*p=='\\') {
 			p += 1;
@@ -503,7 +502,7 @@ tokval(Token *tp)
 			n = *p++;
 		if (*p!='\'')
 			error(WARNING, "Multibyte character constant undefined");
-		else if (n>127)
+		else if (n>127 && !wide)
 			error(WARNING, "Character constant taken as not signed");
 		v.val = n;
 		break;
