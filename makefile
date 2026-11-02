@@ -260,6 +260,7 @@ RCCSRCS=src/alloc.c \
 	src/bytecode.c \
 	src/gen.c \
 	src/stab.c \
+	src/llvm.c \
 	$Bdagcheck.c \
 	$Balpha.c \
 	$Bmips.c \
