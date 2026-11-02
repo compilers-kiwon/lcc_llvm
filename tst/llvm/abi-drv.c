@@ -37,6 +37,37 @@ double lt_press3(struct i2, struct id, struct f2, struct l3, struct di, struct i
 double lt_press4(int, struct d2, struct d2, struct d2, struct d2, struct f1, float);
 double lc_press(int, int), lc_var(int), lc_noproto(int);
 
+#define DR(n) struct n dr_##n(int k) { struct n s; fill_##n(&s, k); return s; }
+#define UDR(n) union n dr_##n(int k) { union n s; fill_##n(&s, k); return s; }
+SHAPES(DR)
+USHAPES(UDR)
+#define RDECL(n) struct n lr_##n(int); double lcr_##n(int), llr_##n(int);
+#define URDECL(n) union n lr_##n(int); double lcr_##n(int), llr_##n(int);
+SHAPES(RDECL)
+USHAPES(URDECL)
+struct l3 dr_big(long a, long b, long c, long d, long e, struct i2 s) {
+	struct l3 r;
+	r.a = a + b + c; r.b = d + e; r.c = (long)sum_i2(&s);
+	return r;
+}
+struct l2 dr_small(long a, long b, long c, long d, long e, struct i2 s) {
+	struct l2 r;
+	r.a = a + b + c; r.b = d + e + (long)sum_i2(&s);
+	return r;
+}
+struct d2 dr_var(int n, ...) {
+	va_list ap; struct d2 r;
+	va_start(ap, n);
+	r.a = va_arg(ap, long); r.b = 0;
+	while (--n > 0) r.b = r.b * 2 + va_arg(ap, double);
+	va_end(ap);
+	return r;
+}
+struct l3 lr_big(long, long, long, long, long, struct i2);
+struct l2 lr_small(long, long, long, long, long, struct i2);
+struct d2 lr_var(int, ...);
+double lcr_misc(int, int);
+
 double dv(int n, ...) {
 	va_list ap; double s;
 	struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f;
@@ -56,6 +87,21 @@ int main(void) {
 #define UCHECK(n) { union n s; fill_##n(&s, k); CHK(lt_##n(s), sum_##n(&s)); CHK(lc_##n(k), sum_##n(&s)); CHK(ll_##n(k), sum_##n(&s)); }
 		SHAPES(CHECK)
 		USHAPES(UCHECK)
+#define CHECKR(n) { struct n s, r; fill_##n(&s, k); r = lr_##n(k); CHK(sum_##n(&r), sum_##n(&s)); CHK(lcr_##n(k), sum_##n(&s)); CHK(llr_##n(k), sum_##n(&s)); }
+#define UCHECKR(n) { union n s, r; fill_##n(&s, k); r = lr_##n(k); CHK(sum_##n(&r), sum_##n(&s)); CHK(lcr_##n(k), sum_##n(&s)); CHK(llr_##n(k), sum_##n(&s)); }
+		SHAPES(CHECKR)
+		USHAPES(UCHECKR)
+		{
+			struct i2 i2; struct l3 l3, l3r; struct l2 l2, l2r; struct d2 d2, d2r;
+			fill_i2(&i2, k);
+			l3 = dr_big(k, k + 1, k + 2, k + 3, k + 4, i2); l3r = lr_big(k, k + 1, k + 2, k + 3, k + 4, i2);
+			CHK(sum_l3(&l3r), sum_l3(&l3)); CHK(lcr_misc(k, 1), sum_l3(&l3)); CHK(lcr_misc(k, 11), sum_l3(&l3));
+			l2 = dr_small(k, k + 1, k + 2, k + 3, k + 4, i2); l2r = lr_small(k, k + 1, k + 2, k + 3, k + 4, i2);
+			CHK(sum_l2(&l2r), sum_l2(&l2)); CHK(lcr_misc(k, 2), sum_l2(&l2)); CHK(lcr_misc(k, 12), sum_l2(&l2));
+			d2 = dr_var(4, (long)k, 0.5, k + 0.25, -1.0); d2r = lr_var(4, (long)k, 0.5, k + 0.25, -1.0);
+			CHK(sum_d2(&d2r), sum_d2(&d2)); CHK(lcr_misc(k, 3), sum_d2(&d2)); CHK(lcr_misc(k, 13), sum_d2(&d2));
+			CHK(lcr_misc(k, 4), dt_i3(dr_i3(k)) + dt_l3(dr_l3(k)) + 2 * dt_f3(dr_f3(k)) + 3 * dt_di(dr_di(k)));
+		}
 		{
 			struct l2 l2; struct d2 d2a, d2b, d2c, d2d; struct i2 i2; struct id id; struct f2 f2;
 			struct l3 l3; struct di di; struct i3 i3; struct fi fi; struct f1 f1; struct f3 f3; struct ffi ffi;

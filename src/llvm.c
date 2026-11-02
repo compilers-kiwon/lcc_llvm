@@ -260,12 +260,40 @@ static char *byvalstr(Type ty) {
 		ty->align < 8 ? 8 : ty->align);
 }
 
+/*
+ * A structure result is classified as an argument, and returned in up
+ * to two registers (rax and rdx, xmm0 and xmm1) or, if larger than 16
+ * bytes, in memory at an address passed by the caller (sret).  The
+ * front end (wants_callb=0) always passes that address as the first
+ * argument; for a result in registers, the back end drops it.
+ */
+
+/* retparts - set part[] to the registers of the structure result ty;
+   return how many, or 0 if ty is returned in memory */
+static int retparts(Type ty, char *part[]) {
+	struct regs r;
+
+	r.gp = r.fp = 2;
+	return structparts(ty, &r, part);
+}
+
+/* sretstr - attributes of the address of the structure result ty */
+static char *sretstr(Type ty) {
+	return stringf("sret([%d x i8]) align %d", ty->size, ty->align);
+}
+
 /* rettypestr - LLVM return type of function type fty */
 static char *rettypestr(Type fty) {
 	Type rty = freturn(fty);
 
-	if (isstruct(rty))	/* wants_callb=0: returned via hidden pointer */
-		return "void";
+	if (isstruct(rty)) {
+		char *part[2];
+		switch (retparts(rty, part)) {
+		case 0: return "void";
+		case 1: return part[0];
+		default: return stringf("{ %s, %s }", part[0], part[1]);
+		}
+	}
 	if (isint(rty) || isenum(rty))
 		rty = promote(rty);
 	return typestr(rty);
@@ -691,18 +719,29 @@ static char *nodeval(Node p) {
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
 	char *f = nodeval(p->kids[0]), *v = NULL, *rt = optypestr(p->op);
-	struct arg *a, *list = NULL, **tail = &list;
+	struct arg *a, *list = NULL, **tail = &list, *res = NULL;
 	struct regs r;
+	char *rpart[2];
 	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
+	int nres = 0;	/* registers of a structure result */
 
 	if ((i = builtin(p)) != 0)
 		return emitbuiltin(p, i);
+	if (isstruct(rty)) {	/* args has its address first */
+		assert(args && args->type && strcmp(args->type, "ptr") == 0);
+		res = args;
+		if ((nres = retparts(rty, rpart)) > 0) {
+			args = args->link;
+			rt = rettypestr(fty);
+		} else
+			res->attr = sretstr(rty);
+	}
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
 		nfixed = 0;
 	else if (variadic(fty)) {
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
-		if (isstruct(rty))	/* the hidden result address */
+		if (nres == 0 && isstruct(rty))	/* the result address */
 			nfixed++;
 	}
 	if (optype(p->op) != V && (isint(rty) || isenum(rty))
@@ -747,7 +786,7 @@ static char *emitcall(Node p) {
 		}
 	}
 	*tail = NULL;
-	if (optype(p->op) != V)
+	if (optype(p->op) != V || nres > 0)
 		v = newreg();
 	startline();
 	if (v)
@@ -764,6 +803,21 @@ static char *emitcall(Node p) {
 	print(")\n");
 	args = NULL;
 	argtail = &args;
+	if (nres > 0) {	/* store the registers at the result address */
+		for (i = 0; i < nres; i++) {
+			char *part = v, *addr = res->val;
+			if (nres > 1) {
+				part = newreg();
+				inst("%s = extractvalue %s %s, %d", part, rt, v, i);
+			}
+			if (i > 0) {
+				addr = newreg();
+				inst("%s = getelementptr i8, ptr %s, i64 %d", addr, res->val, 8*i);
+			}
+			inst("store %s %s, ptr %s, align %d", rpart[i], part, addr, rty->align);
+		}
+		return "";
+	}
 	if (narrow) {
 		char *w = newreg();
 		inst("%s = %s %s %s to %s", w, isunsigned(rty) ? "zext" : "sext",
@@ -1097,6 +1151,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	Code cp;
 	Node e;
 	struct regs r;
+	char *rpart[2];
+	int nres, np;
 
 	flushglobal();
 	infunc = 1;
@@ -1115,12 +1171,16 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		rettype, fname);
 	r.gp = 6;
 	r.fp = 8;
-	for (i = 0; caller[i]; i++) {
+	nres = isstruct(freturn(f->type)) ? retparts(freturn(f->type), rpart) : 0;
+	for (i = nres > 0, np = 0; caller[i]; i++) {
 		Type ty = caller[i]->type;
 		char *part[2];
 		int j, n;
-		print("%s", i ? ", " : "");
-		if (!isstruct(ty)) {
+		print("%s", np++ ? ", " : "");
+		if (i == 0 && isstruct(freturn(f->type))) {	/* the result address */
+			print("ptr %s %%a0", sretstr(freturn(f->type)));
+			r.gp--;
+		} else if (!isstruct(ty)) {
 			print("%s %%a%d", typestr(ty), i);
 			scalarreg(typestr(ty), &r);
 		} else if ((n = structparts(ty, &r, part)) == 0)
@@ -1130,7 +1190,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 				print("%s%s %%a%d.%d", j ? ", " : "", part[j], i, j);
 	}
 	if (variadic(f->type))
-		print("%s...", i ? ", " : "");
+		print("%s...", np ? ", " : "");
 	print(") {\nentry:\n");
 	if (strcmp(rettype, "void") != 0)
 		inst("%%retval = alloca %s", rettype);
@@ -1140,7 +1200,11 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		Symbol p = caller[i], q = callee[i];
 		char *part[2];
 		int j, n;
-		if (!isstruct(p->type)) {
+		if (i == 0 && nres > 0) {	/* the result goes in %retval */
+			p->x.name = localname(p);
+			emitalloca(p);
+			inst("store ptr %%retval, ptr %s", p->x.name);
+		} else if (!isstruct(p->type)) {
 			p->x.name = localname(p);
 			emitalloca(p);
 			inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
@@ -1245,8 +1309,8 @@ static void I(import)(Symbol p) {
 		print("declare %s %s(", rettypestr(p->type), p->x.name);
 		r.gp = 6;
 		r.fp = 8;
-		if (isstruct(freturn(p->type))) {	/* the result address */
-			print("ptr");
+		if (isstruct(freturn(p->type)) && retparts(freturn(p->type), part) == 0) {
+			print("ptr %s", sretstr(freturn(p->type)));	/* the result address */
 			n++;
 			r.gp--;
 		}

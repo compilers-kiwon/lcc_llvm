@@ -3,9 +3,12 @@
  * from clang to lcc (lt_), from lcc to clang (lc_, calling dt_ in
  * abi-drv.c) and from lcc to lcc (ll_), in registers or on the stack,
  * also when the registers run out part way, to functions with variable
- * arguments, and through a declaration without a prototype.  Compiled
- * by lcc; abi-drv.c checks the results.
+ * arguments, and through a declaration without a prototype; and
+ * returned in registers or memory, from lcc (lr_) and to lcc (lcr_,
+ * calling dr_, and llr_).  Compiled by lcc; abi-drv.c checks the
+ * results.
  */
+#include <stdarg.h>
 #include "abi.h"
 
 #define DECL(n) double dt_##n(struct n);
@@ -24,6 +27,62 @@ USHAPES(UCALL)
 #define USELF(n) double ll_##n(int k) { union n s; fill_##n(&s, k); return lt_##n(s); }
 SHAPES(SELF)
 USHAPES(USELF)
+
+#define RDECL(n) struct n dr_##n(int);
+#define URDECL(n) union n dr_##n(int);
+SHAPES(RDECL)
+USHAPES(URDECL)
+#define RET(n) struct n lr_##n(int k) { struct n s; fill_##n(&s, k); return s; }
+#define URET(n) union n lr_##n(int k) { union n s; fill_##n(&s, k); return s; }
+SHAPES(RET)
+USHAPES(URET)
+#define CALLR(n) double lcr_##n(int k) { struct n s; s = dr_##n(k); return sum_##n(&s); }
+#define UCALLR(n) double lcr_##n(int k) { union n s; s = dr_##n(k); return sum_##n(&s); }
+SHAPES(CALLR)
+USHAPES(UCALLR)
+#define SELFR(n) double llr_##n(int k) { struct n s; s = lr_##n(k); return sum_##n(&s); }
+#define USELFR(n) double llr_##n(int k) { union n s; s = lr_##n(k); return sum_##n(&s); }
+SHAPES(SELFR)
+USHAPES(USELFR)
+
+/* the address of a result in memory takes an integer register; one in
+   registers does not */
+struct l3 lr_big(long a, long b, long c, long d, long e, struct i2 s) {
+	struct l3 r;
+	r.a = a + b + c; r.b = d + e; r.c = (long)sum_i2(&s);
+	return r;
+}
+struct l2 lr_small(long a, long b, long c, long d, long e, struct i2 s) {
+	struct l2 r;
+	r.a = a + b + c; r.b = d + e + (long)sum_i2(&s);
+	return r;
+}
+/* with variable arguments */
+struct d2 lr_var(int n, ...) {
+	va_list ap; struct d2 r;
+	va_start(ap, n);
+	r.a = va_arg(ap, long); r.b = 0;
+	while (--n > 0) r.b = r.b * 2 + va_arg(ap, double);
+	va_end(ap);
+	return r;
+}
+struct l3 dr_big(long, long, long, long, long, struct i2);
+struct l2 dr_small(long, long, long, long, long, struct i2);
+struct d2 dr_var(int, ...);
+double lcr_misc(int k, int which) {
+	struct i2 i2; struct l3 l3; struct l2 l2; struct d2 d2;
+	fill_i2(&i2, k);
+	switch (which) {
+	case 1: l3 = dr_big(k, k + 1, k + 2, k + 3, k + 4, i2); return sum_l3(&l3);
+	case 2: l2 = dr_small(k, k + 1, k + 2, k + 3, k + 4, i2); return sum_l2(&l2);
+	case 3: d2 = dr_var(4, (long)k, 0.5, k + 0.25, -1.0); return sum_d2(&d2);
+	case 11: l3 = lr_big(k, k + 1, k + 2, k + 3, k + 4, i2); return sum_l3(&l3);
+	case 12: l2 = lr_small(k, k + 1, k + 2, k + 3, k + 4, i2); return sum_l2(&l2);
+	case 13: d2 = lr_var(4, (long)k, 0.5, k + 0.25, -1.0); return sum_d2(&d2);
+	case 4: return dt_i3(dr_i3(k)) + dt_l3(dr_l3(k)) + 2 * dt_f3(dr_f3(k)) + 3 * dt_di(lr_di(k));
+	}
+	return 0;
+}
 
 /* registers run out: the structure goes on the stack, later scalars
    still take the registers left */
