@@ -669,7 +669,8 @@ static char *nodeval(Node p) {
 		{
 			char *a = nodeval(p->kids[0]);
 			v = newreg();
-			inst("%s = load %s, ptr %s", v, optypestr(p->op), a);
+			inst("%s = load %s%s, ptr %s", v, p->volatil ? "volatile " : "",
+				optypestr(p->op), a);
 		}
 		break;
 	case ADD: case SUB:
@@ -1052,14 +1053,16 @@ static void emitnode(Node p) {
 			int align = p->syms[1]->u.c.v.i;
 			assert(generic(p->kids[1]->op) == INDIR);
 			inst("call void @llvm.memcpy.p0.p0.i64(ptr align %d %s, "
-				"ptr align %d %s, i64 %D, i1 false)", align, a, align, b,
-				p->syms[0]->u.c.v.i);
+				"ptr align %d %s, i64 %D, i1 %s)", align, a, align, b,
+				p->syms[0]->u.c.v.i,
+				p->volatil || p->kids[1]->volatil ? "true" : "false");
 			usedmemcpy = 1;
 			break;
 		}
 		{
 			char *a = nodeval(p->kids[0]), *v = nodeval(p->kids[1]);
-			inst("store %s %s, ptr %s", optypestr(p->op), v, a);
+			inst("store %s%s %s, ptr %s", p->volatil ? "volatile " : "",
+				optypestr(p->op), v, a);
 		}
 		break;
 	case RET:
