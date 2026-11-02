@@ -2,7 +2,7 @@
 #define __LIMITS
 
 #define CHAR_BIT	8
-#define MB_LEN_MAX	1
+#define MB_LEN_MAX	16	/* as glibc */
 
 #define UCHAR_MAX	0xff
 #define USHRT_MAX	0xffff
