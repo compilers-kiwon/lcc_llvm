@@ -602,7 +602,12 @@ Tree cast(Tree p, Type type) {
 					p = simplify(CVI, dst, p, NULL);
 					break;
 				case UNSIGNED:
-					if (isfloat(dst) && src->size >= longdouble->size) {
+					if (isfloat(dst) && generic(p->op) == CNST
+					&& src->size >= longdouble->size)
+						/* the host's long double holds u exactly,
+						   so this rounds once */
+						p = simplify(CVU, dst, p, NULL);
+					else if (isfloat(dst) && src->size >= longdouble->size) {
 						/* 2*(u>>1) + (u&1) below rounds twice when u
 						   has more bits than long double has digits.
 						   Convert u directly if it fits the signed type;
