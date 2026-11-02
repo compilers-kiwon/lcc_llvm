@@ -245,9 +245,14 @@ static int structparts(Type ty, struct regs *r, char *part[]) {
 	return n;
 }
 
+/* ssepart - whether the LLVM type t goes in an SSE register */
+static int ssepart(char *t) {
+	return strcmp(t, "float") == 0 || strcmp(t, "double") == 0;
+}
+
 /* scalarreg - take a register for a scalar argument of LLVM type t */
 static void scalarreg(char *t, struct regs *r) {
-	if (strcmp(t, "float") == 0 || strcmp(t, "double") == 0) {
+	if (ssepart(t)) {
 		if (r->fp > 0)
 			r->fp--;
 	} else if (r->gp > 0)
@@ -403,9 +408,26 @@ static char *vaslot(Node p) {
 }
 
 /*
+ * needsslot - whether a va_arg of type ty needs a place for its value
+ * because it is not in the argument area as it is: a float arrives as a
+ * double, and a structure in an SSE register and another register is
+ * split in the register save area
+ */
+static int needsslot(Type ty) {
+	struct regs r;
+	char *part[2];
+
+	r.gp = 6;
+	r.fp = 8;
+	if (isstruct(ty))
+		return structparts(ty, &r, part) == 2
+			&& (ssepart(part[0]) || ssepart(part[1]));
+	return isfloat(ty) && ty->size < doubletype->size;
+}
+
+/*
  * allocvaslots - make an entry block place for each va_arg call in dag
- * p whose value is not in the argument area as it is: a float arrives
- * as a double.  The call returns the address of its value.
+ * p that needs one.  The call returns the address of its value.
  */
 static void allocvaslots(Node p) {
 	Type ty;
@@ -413,8 +435,7 @@ static void allocvaslots(Node p) {
 	if (p == NULL)
 		return;
 	if (generic(p->op) == CALL && builtin(p) == VAARG && vaslot(p) == NULL
-	&& isfloat(ty = unqual(freturn(p->syms[0]->type)->type))
-	&& ty->size < doubletype->size) {
+	&& needsslot(ty = unqual(freturn(p->syms[0]->type)->type))) {
 		struct vaslot *s;
 		NEW(s, FUNC);
 		s->call = p;
@@ -428,48 +449,126 @@ static void allocvaslots(Node p) {
 }
 
 /*
- * vaaddr - emit the SysV va_arg for an argument of class INTEGER or, if
- * fp, SSE, and return its address.  The va_list ap has gp_offset at 0,
- * fp_offset at 4, overflow_arg_area at 8 and reg_save_area at 16; the
- * register save area has the 6 integer registers and then the 8 SSE
- * registers, 16 bytes each.  The value is used where it is.  LLVM's
- * va_arg instruction is not used: LLVM 18 at -O0 miscompiles it outside
- * the entry block.
+ * vaaddr - emit the SysV va_arg for an argument of type ty, and return
+ * its address.  The va_list ap has gp_offset at 0, fp_offset at 4,
+ * overflow_arg_area at 8 and reg_save_area at 16; the register save
+ * area has the 6 integer registers, 8 bytes each, and then the 8 SSE
+ * registers, 16 bytes each.  An argument is in registers if all it
+ * needs are left, else on the stack.  The value is used where it is,
+ * except that a structure in an SSE register and another register is
+ * put together in slot.  LLVM's va_arg instruction is not used: LLVM 18
+ * at -O0 miscompiles it outside the entry block.
  */
-static char *vaaddr(char *ap, int fp) {
-	char *offp = ap, *off = newreg(), *c = newreg(), *rsap = newreg();
-	char *rsa = newreg(), *ra = newreg(), *next = newreg(), *ovp = newreg();
-	char *ov = newreg(), *ov2 = newreg(), *a = newreg();
-	int reg = ++nblock, mem = ++nblock, done = ++nblock;
+static char *vaaddr(char *ap, Type ty, char *slot) {
+	char *part[2], *gp = NULL, *fp = NULL, *fpp = NULL, *c = NULL;
+	char *rsap, *rsa, *ra, *ovp, *ov, *ov2, *a;
+	int i, n, ngp = 0, nfp = 0, size = roundup(ty->size, 8);
+	int reg = 0, mem, done;
+	struct regs r;
 
-	if (fp) {
-		offp = newreg();
-		inst("%s = getelementptr i8, ptr %s, i64 4", offp, ap);
+	if (isstruct(ty)) {
+		r.gp = 6;
+		r.fp = 8;
+		n = structparts(ty, &r, part);
+	} else {	/* promoted */
+		n = 1;
+		part[0] = isfloat(ty) ? "double" : "i64";
 	}
-	inst("%s = load i32, ptr %s", off, offp);
-	inst("%s = icmp ule i32 %s, %d", c, off, fp ? 6*8 + 7*16 : 5*8);
-	inst("br i1 %s, label %%b%d, label %%b%d", c, reg, mem);
-	print("b%d:\n", reg);
-	inst("%s = getelementptr i8, ptr %s, i64 16", rsap, ap);
-	inst("%s = load ptr, ptr %s", rsa, rsap);
-	inst("%s = getelementptr i8, ptr %s, i32 %s", ra, rsa, off);
-	inst("%s = add i32 %s, %d", next, off, fp ? 16 : 8);
-	inst("store i32 %s, ptr %s", next, offp);
-	inst("br label %%b%d", done);
+	for (i = 0; i < n; i++)
+		if (ssepart(part[i]))
+			nfp++;
+		else
+			ngp++;
+	if (ngp > 0) {
+		gp = newreg();
+		inst("%s = load i32, ptr %s", gp, ap);
+		c = newreg();
+		inst("%s = icmp ule i32 %s, %d", c, gp, 6*8 - 8*ngp);
+	}
+	if (nfp > 0) {
+		char *c2 = newreg();
+		fpp = newreg();
+		inst("%s = getelementptr i8, ptr %s, i64 4", fpp, ap);
+		fp = newreg();
+		inst("%s = load i32, ptr %s", fp, fpp);
+		inst("%s = icmp ule i32 %s, %d", c2, fp, 6*8 + 8*16 - 16*nfp);
+		if (c) {
+			char *both = newreg();
+			inst("%s = and i1 %s, %s", both, c, c2);
+			c2 = both;
+		}
+		c = c2;
+	}
+	mem = ++nblock;
+	done = ++nblock;
+	if (c) {	/* n > 0: in registers? */
+		reg = ++nblock;
+		inst("br i1 %s, label %%b%d, label %%b%d", c, reg, mem);
+		print("b%d:\n", reg);
+		rsap = newreg();
+		inst("%s = getelementptr i8, ptr %s, i64 16", rsap, ap);
+		rsa = newreg();
+		inst("%s = load ptr, ptr %s", rsa, rsap);
+		ra = newreg();
+		inst("%s = getelementptr i8, ptr %s, i32 %s", ra, rsa, gp ? gp : fp);
+		assert(slot || nfp == 0 || n == 1);
+		if (slot) {	/* gather the parts */
+			int ig = 0, is = 0;
+			for (i = 0; i < n; i++) {
+				char *src = newreg(), *dst = slot, *v = newreg();
+				if (ssepart(part[i]))
+					inst("%s = getelementptr i8, ptr %s, i32 %s", src, rsa, fp);
+				else
+					inst("%s = getelementptr i8, ptr %s, i32 %s", src, rsa, gp);
+				if (ssepart(part[i]) ? is++ : ig++) {
+					char *s2 = newreg();
+					inst("%s = getelementptr i8, ptr %s, i64 %d", s2, src,
+						ssepart(part[i]) ? 16 : 8);
+					src = s2;
+				}
+				if (i > 0) {
+					dst = newreg();
+					inst("%s = getelementptr i8, ptr %s, i64 %d", dst, slot, 8*i);
+				}
+				inst("%s = load %s, ptr %s, align 8", v, part[i], src);
+				inst("store %s %s, ptr %s, align %d", part[i], v, dst, ty->align);
+			}
+			ra = slot;
+		}
+		if (ngp > 0) {
+			char *next = newreg();
+			inst("%s = add i32 %s, %d", next, gp, 8*ngp);
+			inst("store i32 %s, ptr %s", next, ap);
+		}
+		if (nfp > 0) {
+			char *next = newreg();
+			inst("%s = add i32 %s, %d", next, fp, 16*nfp);
+			inst("store i32 %s, ptr %s", next, fpp);
+		}
+		inst("br label %%b%d", done);
+	} else
+		inst("br label %%b%d", mem);
 	print("b%d:\n", mem);
+	ovp = newreg();
 	inst("%s = getelementptr i8, ptr %s, i64 8", ovp, ap);
+	ov = newreg();
 	inst("%s = load ptr, ptr %s", ov, ovp);
-	inst("%s = getelementptr i8, ptr %s, i64 8", ov2, ov);
+	ov2 = newreg();
+	inst("%s = getelementptr i8, ptr %s, i64 %d", ov2, ov, size);
 	inst("store ptr %s, ptr %s", ov2, ovp);
 	inst("br label %%b%d", done);
 	print("b%d:\n", done);
-	inst("%s = phi ptr [ %s, %%b%d ], [ %s, %%b%d ]", a, ra, reg, ov, mem);
+	a = newreg();
+	if (reg)
+		inst("%s = phi ptr [ %s, %%b%d ], [ %s, %%b%d ]", a, ra, reg, ov, mem);
+	else
+		inst("%s = phi ptr [ %s, %%b%d ]", a, ov, mem);
 	return a;
 }
 
 /*
  * emitbuiltin - emit the call p to the stdarg function b.  va_arg
- * returns the address of a scalar of the type promoted by a call (int
+ * returns the address of a value of the type promoted by a call (int
  * for char and short, whose bytes come first, and double for float).
  */
 static char *emitbuiltin(Node p, int b) {
@@ -493,12 +592,8 @@ static char *emitbuiltin(Node p, int b) {
 	}
 	assert(b == VAARG);
 	ty = unqual(freturn(p->syms[0]->type)->type);
-	if (isstruct(ty)) {
-		error("llvm back end: va_arg of a structure is not supported\n");
-		return "null";
-	}
-	v = vaaddr(ap, isfloat(ty));
-	if (slot) {	/* float */
+	v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
+	if (slot && !isstruct(ty)) {	/* float */
 		char *d = newreg(), *f = newreg();
 		inst("%s = load double, ptr %s", d, v);
 		inst("%s = fptrunc double %s to float", f, d);

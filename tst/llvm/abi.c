@@ -130,6 +130,35 @@ double lc_var(int k) {
 	return dv(6, a, b, c, d, e, f, k + 0.5);
 }
 
+/* va_arg of structures: lvs here, dvs in abi-drv.c */
+double lvs(const char *fmt, ...) {
+	va_list ap; double s;
+	va_start(ap, fmt);
+	s = vsum(fmt, ap);
+	va_end(ap);
+	return s;
+}
+double dvs(const char *, ...);
+double lc_vs(int k, int which, int self) {
+	double (*f)(const char *, ...) = self ? lvs : dvs;
+	struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f2;
+	struct id g; struct fi h; struct c3 i; struct a13 j; struct nest kk; struct ffi l;
+	struct sd m; struct f1 nn; struct d1 o; struct ic p;
+	fill_i3(&a, k); fill_f3(&b, k); fill_di(&c, k); fill_l3(&d, k); fill_d2(&e, k); fill_l2(&f2, k);
+	fill_id(&g, k); fill_fi(&h, k); fill_c3(&i, k); fill_a13(&j, k); fill_nest(&kk, k); fill_ffi(&l, k);
+	fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k);
+	switch (which) {
+	case 0: return f("abcdefghijklmnop", a, b, c, d, e, f2, g, h, i, j, kk, l, m, nn, o, p);
+	case 1: return f("cccccccc", c, c, c, c, c, c, c, c);
+	case 2: return f("eeeeee", e, e, e, e, e, e);
+	case 3: return f("xxxxxxxxxebx", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, e, b, 10.0);
+	case 4: return f("yyyyycyf", 1L, 2L, 3L, 4L, 5L, c, 6L, f2);
+	case 5: return f("yyyyfgy", 1L, 2L, 3L, 4L, f2, g, 7L);
+	case 6: return f("kblkblkbl", kk, b, l, kk, b, l, kk, b, l);
+	}
+	return 0;
+}
+
 /* through a declaration without a prototype */
 double dt_i3(), dt_ffi(), dt_l3();
 double lc_noproto(int k) {

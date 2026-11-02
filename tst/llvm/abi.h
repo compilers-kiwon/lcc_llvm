@@ -1,8 +1,10 @@
 /*
  * Structures for the SysV x86-64 ABI tests in abi.c and abi-drv.c, with
  * functions that fill them from k and sum their members (not their
- * padding).  SHAPES lists them.
+ * padding).  SHAPES lists them.  vsum reads variable arguments.
  */
+#include <stdarg.h>
+
 struct c1 { char a; };
 struct c3 { char a, b, c; };
 struct s2 { short a; char b; };
@@ -98,3 +100,22 @@ static void fill_pl(struct pl *p, int k) { p->p = abitext + (k & 15); p->n = k *
 static double sum_pl(struct pl *p) { return p->p[0] + 10.0 * p->p[1] + p->n; }
 static void fill_sd(struct sd *p, int k) { p->a = k; p->b = k * 0.75; p->c = -k; }
 static double sum_sd(struct sd *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
+
+/* vsum - sum the arguments in ap, of the types given by the letters of
+   fmt: a structure from VSHAPES, x double, y long */
+#define VSHAPES(X) X('a', i3) X('b', f3) X('c', di) X('d', l3) X('e', d2) \
+	X('f', l2) X('g', id) X('h', fi) X('i', c3) X('j', a13) X('k', nest) \
+	X('l', ffi) X('m', sd) X('n', f1) X('o', d1) X('p', ic)
+static double vsum(const char *fmt, va_list ap) {
+	double s = 0;
+	for (; *fmt; fmt++) {
+		s *= 2;
+		switch (*fmt) {
+#define VCASE(c, n) case c: { struct n x; x = va_arg(ap, struct n); s += sum_##n(&x); } break;
+		VSHAPES(VCASE)
+		case 'x': s += va_arg(ap, double); break;
+		case 'y': s += va_arg(ap, long); break;
+		}
+	}
+	return s;
+}

@@ -36,6 +36,14 @@ double lt_press2(double, double, double, double, double, double, double, struct 
 double lt_press3(struct i2, struct id, struct f2, struct l3, struct di, struct i3, struct l2, struct fi);
 double lt_press4(int, struct d2, struct d2, struct d2, struct d2, struct f1, float);
 double lc_press(int, int), lc_var(int), lc_noproto(int);
+double lvs(const char *, ...), lc_vs(int, int, int);
+double dvs(const char *fmt, ...) {
+	va_list ap; double s;
+	va_start(ap, fmt);
+	s = vsum(fmt, ap);
+	va_end(ap);
+	return s;
+}
 
 #define DR(n) struct n dr_##n(int k) { struct n s; fill_##n(&s, k); return s; }
 #define UDR(n) union n dr_##n(int k) { union n s; fill_##n(&s, k); return s; }
@@ -119,6 +127,22 @@ int main(void) {
 			CHK(lt_press4(k, d2a, d2b, d2c, d2d, f1, k + 0.5f), w); CHK(lc_press(k, 4), w); CHK(lc_press(k, 14), w);
 			CHK(lc_var(k), dv(6, i3, f3, di, l3, d2a, l2, k + 0.5));
 			CHK(lc_noproto(k), dt_i3(i3) + 2 * dt_ffi(ffi) + 3 * dt_l3(l3));
+		}
+		{
+			struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f2;
+			struct id g; struct fi h; struct c3 i; struct a13 j; struct nest kk; struct ffi l;
+			struct sd m; struct f1 nn; struct d1 o; struct ic p;
+			fill_i3(&a, k); fill_f3(&b, k); fill_di(&c, k); fill_l3(&d, k); fill_d2(&e, k); fill_l2(&f2, k);
+			fill_id(&g, k); fill_fi(&h, k); fill_c3(&i, k); fill_a13(&j, k); fill_nest(&kk, k); fill_ffi(&l, k);
+			fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k);
+#define VS(w, args) CHK(lvs args, dvs args); CHK(lc_vs(k, w, 0), dvs args); CHK(lc_vs(k, w, 1), dvs args);
+			VS(0, ("abcdefghijklmnop", a, b, c, d, e, f2, g, h, i, j, kk, l, m, nn, o, p))
+			VS(1, ("cccccccc", c, c, c, c, c, c, c, c))
+			VS(2, ("eeeeee", e, e, e, e, e, e))
+			VS(3, ("xxxxxxxxxebx", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, e, b, 10.0))
+			VS(4, ("yyyyycyf", 1L, 2L, 3L, 4L, 5L, c, 6L, f2))
+			VS(5, ("yyyyfgy", 1L, 2L, 3L, 4L, f2, g, 7L))
+			VS(6, ("kblkblkbl", kk, b, l, kk, b, l, kk, b, l))
 		}
 	}
 	printf("%d checks, %d bad\n", n, bad);
