@@ -4,6 +4,9 @@
 
 static char rcsid[] = "$Id$";
 
+/* C99, but glibc has it; stdlib.h declares it only outside strict C89 */
+extern long double strtold(const char *, char **);
+
 #define MAXTOKEN 32
 
 enum { BLANK=01,  NEWLINE=02, LETTER=04,
@@ -776,7 +779,10 @@ static Symbol fcon(void) {
 	}
 
 	errno = 0;
-	tval.u.c.v.d = strtod(token, NULL);
+	if ((*cp == 'l' || *cp == 'L') && longdouble->size > doubletype->size)
+		tval.u.c.v.d = strtold(token, NULL);	/* more digits than a double */
+	else
+		tval.u.c.v.d = strtod(token, NULL);
 	if (errno == ERANGE)
 		warning("overflow in floating constant `%S'\n", token,
 			(char*)cp - token);
