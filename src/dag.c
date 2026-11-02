@@ -243,6 +243,15 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      list(newnode(tp->op == ARG+B ? tp->op : op, l, NULL, NULL));
 		      forest->syms[0] = intconst(tp->type->size);
 		      forest->syms[1] = intconst(tp->type->align);
+		      if (tp->op == ARG+B) {
+		      	/* the size, typed with the structure for back ends
+		      	   that pass it by its members */
+		      	Symbol p;
+		      	NEW(p, FUNC);
+		      	*p = *forest->syms[0];
+		      	p->type = unqual(tp->type);
+		      	forest->syms[0] = p;
+		      }
 		      if (!IR->left_to_right)
 		      	listnodes(tp->kids[1], 0, 0); } break;
 	case EQ:  case NE: case GT: case GE: case LE:
