@@ -787,7 +787,6 @@ static void target(Node p) {
                      && p->kids[1]->syms[RX]->u.t.cse
                      && generic(p->kids[1]->syms[RX]->u.t.cse->op) == CNST)) {
                         rtarget(p, 1, intreg[ECX]);
-                        setreg(p, intreg[EAX]);
                 }
                 break;
         case MUL+U:
