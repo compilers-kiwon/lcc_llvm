@@ -61,6 +61,9 @@ static struct laddr *laddrs, **ladtail;
 /* arguments listed since the last call; they all belong to the next CALL */
 struct arg {
 	char *type, *val;
+	Type sty;	/* a structure: val is its address, type is NULL */
+	char *attr;	/* attributes, as byval */
+	int fixed;	/* matches a parameter, not ... */
 	struct arg *link;
 };
 static struct arg *args, **argtail = &args;
@@ -168,13 +171,93 @@ static char *typestr(Type ty) {
 	}
 }
 
-/* argtypestr - LLVM type of an argument of type ty */
+/* argtypestr - LLVM type of a scalar argument of type ty */
 static char *argtypestr(Type ty) {
-	if (isstruct(ty))	/* wants_argb=0: passed by address */
-		return "ptr";
+	assert(!isstruct(ty));
 	if (isint(ty) || isenum(ty))
 		return typestr(promote(ty));
 	return typestr(ty);
+}
+
+/*
+ * SysV x86-64 passes a structure or union of at most 16 bytes in up to
+ * two registers, one for each eightbyte: an SSE register if it holds
+ * only floats and doubles, else an integer register.  Larger ones, and
+ * ones for which too few of the 6 integer and 8 SSE argument registers
+ * are left, are copied to the stack (byval).
+ */
+enum { INTEGER = 1, SSE };
+
+/* classify - merge the classes of the scalars in ty at offset off */
+static void classify(Type ty, int off, int cls[]) {
+	ty = unqual(ty);
+	if (isstruct(ty)) {
+		Field f;
+		for (f = ty->u.sym->u.s.flist; f; f = f->link)
+			classify(f->type, off + f->offset, cls);
+	} else if (isarray(ty)) {
+		int i;
+		for (i = 0; ty->type->size > 0 && i < ty->size/ty->type->size; i++)
+			classify(ty->type, off + i*ty->type->size, cls);
+	} else if (isfloat(ty)) {
+		if (cls[off/8] != INTEGER)
+			cls[off/8] = SSE;
+	} else
+		cls[off/8] = INTEGER;
+}
+
+/* free argument registers while arguments are assigned to them */
+struct regs {
+	int gp, fp;
+};
+
+/*
+ * structparts - set part[] to the LLVM types of the registers that pass
+ * the structure ty and take them from r; return how many, or 0 if ty
+ * goes on the stack.  The last part covers only the bytes left, so
+ * that it is not loaded or stored beyond the structure.
+ */
+static int structparts(Type ty, struct regs *r, char *part[]) {
+	int cls[2], i, n, ngp = 0, nfp = 0;
+
+	ty = unqual(ty);
+	if (ty->size == 0 || ty->size > 16)
+		return 0;
+	cls[0] = cls[1] = 0;
+	classify(ty, 0, cls);
+	n = (ty->size + 7)/8;
+	for (i = 0; i < n; i++)
+		if (cls[i] == SSE)
+			nfp++;
+		else
+			ngp++;
+	if (ngp > r->gp || nfp > r->fp)
+		return 0;
+	r->gp -= ngp;
+	r->fp -= nfp;
+	for (i = 0; i < n; i++) {
+		int bytes = ty->size - 8*i < 8 ? ty->size - 8*i : 8;
+		if (cls[i] == SSE)
+			part[i] = bytes > 4 ? "double" : "float";
+		else
+			part[i] = stringf("i%d", 8*bytes);
+	}
+	return n;
+}
+
+/* scalarreg - take a register for a scalar argument of LLVM type t */
+static void scalarreg(char *t, struct regs *r) {
+	if (strcmp(t, "float") == 0 || strcmp(t, "double") == 0) {
+		if (r->fp > 0)
+			r->fp--;
+	} else if (r->gp > 0)
+		r->gp--;
+}
+
+/* byvalstr - attributes of a pointer to the structure ty on the stack */
+static char *byvalstr(Type ty) {
+	return stringf("byval([%d x i8]) align %d", ty->size,
+		ty->align < 8 ? 8 : ty->align);
 }
 
 /* rettypestr - LLVM return type of function type fty */
@@ -608,7 +691,8 @@ static char *nodeval(Node p) {
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
 	char *f = nodeval(p->kids[0]), *v = NULL, *rt = optypestr(p->op);
-	struct arg *a;
+	struct arg *a, *list = NULL, **tail = &list;
+	struct regs r;
 	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
 
 	if ((i = builtin(p)) != 0)
@@ -627,19 +711,56 @@ static char *emitcall(Node p) {
 		rt = typestr(rty);
 		narrow = 1;
 	}
+	/* pass structures in registers or on the stack */
+	r.gp = 6;
+	r.fp = 8;
+	for (i = 0, a = args; a; i++, a = a->link) {
+		struct arg *b;
+		char *part[2];
+		int j, n = 0;
+		a->fixed = nfixed < 0 || i < nfixed;
+		if (a->sty == NULL)
+			scalarreg(a->type, &r);
+		else if ((n = structparts(a->sty, &r, part)) == 0) {
+			a->type = "ptr";
+			a->attr = byvalstr(a->sty);
+		}
+		if (n == 0) {
+			*tail = a;
+			tail = &a->link;
+			continue;
+		}
+		for (j = 0; j < n; j++) {
+			char *addr = a->val;
+			NEW0(b, FUNC);
+			b->type = part[j];
+			b->fixed = a->fixed;
+			b->val = newreg();
+			if (j > 0) {
+				addr = newreg();
+				inst("%s = getelementptr i8, ptr %s, i64 %d", addr, a->val, 8*j);
+			}
+			inst("%s = load %s, ptr %s, align %d", b->val, part[j], addr,
+				a->sty->align);
+			*tail = b;
+			tail = &b->link;
+		}
+	}
+	*tail = NULL;
 	if (optype(p->op) != V)
 		v = newreg();
 	startline();
 	if (v)
 		print("%s = ", v);
 	print("call %s (", rt);
-	for (i = 0, a = args; a && (nfixed < 0 || i < nfixed); i++, a = a->link)
+	for (i = 0, a = list; a && a->fixed; i++, a = a->link)
 		print("%s%s", i ? ", " : "", a->type);
 	if (nfixed >= 0)
 		print("%s...", i ? ", " : "");
 	print(") %s(", f);
-	for (a = args; a; a = a->link)
-		print("%s%s %s", a == args ? "" : ", ", a->type, a->val);
+	for (a = list; a; a = a->link)
+		print("%s%s%s%s %s", a == list ? "" : ", ", a->type,
+			a->attr ? " " : "", a->attr ? a->attr : "", a->val);
 	print(")\n");
 	args = NULL;
 	argtail = &args;
@@ -778,16 +899,15 @@ static void emitnode(Node p) {
 				nodeval(p->kids[0]));
 		break;
 	case ARG:
-		if (optype(p->op) == B) {	/* wants_argb=0: not expected */
-			unsupported(p);
-			break;
-		}
 		{
 			struct arg *a;
-			NEW(a, FUNC);
-			a->type = optypestr(p->op);
+			NEW0(a, FUNC);
+			if (optype(p->op) == B) {	/* dag.c types its size */
+				a->sty = p->syms[0]->type;
+				assert(isstruct(a->sty));
+			} else
+				a->type = optypestr(p->op);
 			a->val = nodeval(p->kids[0]);
-			a->link = NULL;
 			*argtail = a;
 			argtail = &a->link;
 		}
@@ -975,7 +1095,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	struct laddr *a;
 	Gdata g;
 	Code cp;
-	Node r;
+	Node e;
+	struct regs r;
 
 	flushglobal();
 	infunc = 1;
@@ -992,18 +1113,54 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 
 	print("\ndefine %s%s %s(", f->sclass == STATIC ? "internal " : "",
 		rettype, fname);
-	for (i = 0; caller[i]; i++)
-		print("%s%s %%a%d", i ? ", " : "", typestr(caller[i]->type), i);
+	r.gp = 6;
+	r.fp = 8;
+	for (i = 0; caller[i]; i++) {
+		Type ty = caller[i]->type;
+		char *part[2];
+		int j, n;
+		print("%s", i ? ", " : "");
+		if (!isstruct(ty)) {
+			print("%s %%a%d", typestr(ty), i);
+			scalarreg(typestr(ty), &r);
+		} else if ((n = structparts(ty, &r, part)) == 0)
+			print("ptr %s %%a%d", byvalstr(ty), i);
+		else
+			for (j = 0; j < n; j++)
+				print("%s%s %%a%d.%d", j ? ", " : "", part[j], i, j);
+	}
 	if (variadic(f->type))
 		print("%s...", i ? ", " : "");
 	print(") {\nentry:\n");
 	if (strcmp(rettype, "void") != 0)
 		inst("%%retval = alloca %s", rettype);
+	r.gp = 6;
+	r.fp = 8;
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
-		p->x.name = localname(p);
-		emitalloca(p);
-		inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
+		char *part[2];
+		int j, n;
+		if (!isstruct(p->type)) {
+			p->x.name = localname(p);
+			emitalloca(p);
+			inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
+			scalarreg(typestr(p->type), &r);
+		} else if ((n = structparts(p->type, &r, part)) == 0)
+			p->x.name = stringf("%%a%d", i);	/* byval */
+		else {	/* in registers: store them */
+			p->x.name = localname(p);
+			emitalloca(p);
+			for (j = 0; j < n; j++) {
+				char *addr = p->x.name;
+				if (j > 0) {
+					addr = newreg();
+					inst("%s = getelementptr i8, ptr %s, i64 %d",
+						addr, p->x.name, 8*j);
+				}
+				inst("store %s %%a%d.%d, ptr %s, align %d", part[j], i, j,
+					addr, p->type->align);
+			}
+		}
 		if (q->sclass == p->sclass && q->type == p->type)
 			q->x.name = p->x.name;
 		else {	/* the front end assigns caller to callee */
@@ -1014,8 +1171,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	gencode(caller, callee);
 	for (cp = codehead.next; cp; cp = cp->next)
 		if (cp->kind == Gen || cp->kind == Jump || cp->kind == Label)
-			for (r = cp->u.forest; r; r = r->link)
-				allocvaslots(r);
+			for (e = cp->u.forest; e; e = e->link)
+				allocvaslots(e);
 	for (a = laddrs; a; a = a->link)
 		inst("%s = getelementptr i8, ptr %s, i64 %D",
 			a->q->x.name, gname(a->p), a->n);
@@ -1082,15 +1239,31 @@ static void I(import)(Symbol p) {
 		return;	/* see builtin */
 	if (isfunc(p->type)) {
 		Type *proto = p->type->u.f.proto;
-		int i, n = 0;
+		struct regs r;
+		char *part[2];
+		int i, j, k, n = 0;
 		print("declare %s %s(", rettypestr(p->type), p->x.name);
+		r.gp = 6;
+		r.fp = 8;
+		if (isstruct(freturn(p->type))) {	/* the result address */
+			print("ptr");
+			n++;
+			r.gp--;
+		}
 		if (proto && !p->type->u.f.oldstyle) {
 			for (i = 0; proto[i] && proto[i] != voidtype; i++)
-				print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
+				if (!isstruct(proto[i])) {
+					print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
+					scalarreg(argtypestr(proto[i]), &r);
+				} else if ((k = structparts(proto[i], &r, part)) == 0)
+					print("%sptr %s", n++ ? ", " : "", byvalstr(proto[i]));
+				else
+					for (j = 0; j < k; j++)
+						print("%s%s", n++ ? ", " : "", part[j]);
 			if (variadic(p->type))
 				print(", ...");
 		} else
-			print("...");
+			print("%s...", n ? ", " : "");
 		print(")\n");
 	} else
 		print("%s = external global %s\n", p->x.name, typestr(p->type));
@@ -1151,7 +1324,7 @@ Interface llvmIR = {
 	1,		/* little_endian */
 	0,		/* mulops_calls */
 	0,		/* wants_callb */
-	0,		/* wants_argb */
+	1,		/* wants_argb */
 	1,		/* left_to_right */
 	1,		/* wants_dag */
 	0,		/* unsigned_char */
