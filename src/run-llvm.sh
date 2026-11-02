@@ -9,7 +9,7 @@
 #                     llvm/x86_64-linux/tst if there, else x86/linux/tst;
 #                     without NAME.1bk only the messages are compared
 #   unit              tst/llvm/NAME.c compiled by lcc and linked with
-#                     tst/llvm/NAME-drv.c compiled by clang; the driver
+#                     tst/llvm/NAME-drv.c compiled by clang ($DRVCC); the driver
 #                     checks the results and must exit with 0
 #   c-testsuite DIR   DIR/tests/single-exec/*.c tagged c89; stdout+stderr
 #                     compared with NAME.c.expected, exit status must be 0
@@ -29,6 +29,9 @@
 # $LCC replaces the compiler, e.g. LCC=gcc LCCLIBS=-lm to check the suites
 # themselves; compiler messages are then not compared, and tests that check
 # only messages are skipped.  $LCCLIBS goes after the source file.
+# $LCCFLAGS are more options for lcc, e.g. LCCFLAGS=-Wa-O2 to have clang
+# optimize what lcc emits.  $DRVCC compiles the unit test drivers instead
+# of clang, e.g. DRVCC=gcc to link lcc's code with gcc's.
 #
 # Results are PASS, FAIL (wrong output or exit status), CFAIL (does not
 # compile), TIMEOUT and SKIP.  The exit status is 0 only if every test that
@@ -67,6 +70,8 @@ else
 	ownlcc=1
 	LCC="$BUILDDIR/lcc -Wo-lccdir=$BUILDDIR -Iinclude/llvm/x86_64-linux"
 fi
+LCC="$LCC $LCCFLAGS"
+DRVCC=${DRVCC-clang}
 T=${outdir:-$BUILDDIR/llvm/x86_64-linux/tst/$suite}
 mkdir -p $T || exit 1
 
@@ -226,7 +231,7 @@ unit)
 			report CFAIL $n "`grep -v -e 'Unknown preprocessor control' -e ': warning: ' $T/$n.cerr | head -1`"
 			continue
 		fi
-		if ! clang -O0 -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS -lm >$T/$n.lerr 2>&1; then
+		if ! $DRVCC -O0 -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS -lm >$T/$n.lerr 2>&1; then
 			report CFAIL $n "driver: `head -1 $T/$n.lerr`"
 			continue
 		fi
