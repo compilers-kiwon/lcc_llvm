@@ -1,7 +1,8 @@
 /*
  * va_list has the System V x86-64 layout so that it can be passed to
- * glibc (vprintf etc.).  va_start, va_arg and va_end expand to
- * __builtin_va_* forms that the front end does not implement yet.
+ * glibc (vprintf etc.).  The back end implements calls to
+ * __builtin_va_start and __builtin_va_end, and __builtin_va_arg, a
+ * keyword of the front end.
  */
 
 #ifndef __GNUC_VA_LIST
@@ -26,7 +27,8 @@ typedef struct __va_list_tag {
 typedef __gnuc_va_list va_list;
 #endif
 
-#define va_start(ap, last) __builtin_va_start(ap, last)
+extern void __builtin_va_start(__gnuc_va_list), __builtin_va_end(__gnuc_va_list);
+#define va_start(ap, last) __builtin_va_start(ap)
 #define va_arg(ap, type) __builtin_va_arg(ap, type)
 #define va_end(ap) __builtin_va_end(ap)
 

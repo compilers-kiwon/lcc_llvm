@@ -42,6 +42,14 @@ struct nodeval {
 };
 static struct nodeval *nodevals[NVHASH];
 
+/* va_arg calls of the current function and the places for their values */
+struct vaslot {
+	Node call;
+	char *name;
+	struct vaslot *link;
+};
+static struct vaslot *vaslots;
+
 /* addresses of locals computed by address(), emitted after the allocas */
 struct laddr {
 	Symbol q, p;
@@ -61,6 +69,7 @@ static int nreg, nblock, nlocal;
 static int terminated;		/* current basic block has its terminator */
 static char *rettype;		/* LLVM return type of the current function */
 static int usedmemcpy;		/* llvm.memcpy needs a declaration */
+static int usedva;		/* llvm.va_start and va_end need declarations */
 static char *fname;		/* LLVM name of the current function */
 static Node emitting;		/* the forest being emitted */
 
@@ -248,6 +257,145 @@ static void emitalloca(Symbol p) {
 }
 
 static char *nodeval(Node), *emitcall(Node);
+
+/*
+ * builtin - which stdarg function the call p is to, or 0.  stdarg.h
+ * declares __builtin_va_start and __builtin_va_end, and the front end
+ * makes __builtin_va_arg(ap, T) a call to a __builtin_va_arg returning
+ * T *.  They take the va_list as their only argument.
+ */
+enum { VASTART = 1, VAARG, VAEND };
+static int builtin(Node p) {
+	char *name;
+
+	if (specific(p->kids[0]->op) != ADDRG+P)
+		return 0;
+	name = p->kids[0]->syms[0]->name;
+	if (strncmp(name, "__builtin_va_", 13) != 0)
+		return 0;
+	if (strcmp(name + 13, "start") == 0)
+		return VASTART;
+	if (strcmp(name + 13, "arg") == 0)
+		return VAARG;
+	if (strcmp(name + 13, "end") == 0)
+		return VAEND;
+	return 0;
+}
+
+static char *vaslot(Node p) {
+	struct vaslot *s;
+
+	for (s = vaslots; s; s = s->link)
+		if (s->call == p)
+			return s->name;
+	return NULL;
+}
+
+/*
+ * allocvaslots - make an entry block place for each va_arg call in dag
+ * p whose value is not in the argument area as it is: a float arrives
+ * as a double.  The call returns the address of its value.
+ */
+static void allocvaslots(Node p) {
+	Type ty;
+
+	if (p == NULL)
+		return;
+	if (generic(p->op) == CALL && builtin(p) == VAARG && vaslot(p) == NULL
+	&& isfloat(ty = unqual(freturn(p->syms[0]->type)->type))
+	&& ty->size < doubletype->size) {
+		struct vaslot *s;
+		NEW(s, FUNC);
+		s->call = p;
+		s->name = stringf("%%va%d", ++nlocal);
+		s->link = vaslots;
+		vaslots = s;
+		inst("%s = alloca %s, align %d", s->name, typestr(ty), ty->align);
+	}
+	allocvaslots(p->kids[0]);
+	allocvaslots(p->kids[1]);
+}
+
+/*
+ * vaaddr - emit the SysV va_arg for an argument of class INTEGER or, if
+ * fp, SSE, and return its address.  The va_list ap has gp_offset at 0,
+ * fp_offset at 4, overflow_arg_area at 8 and reg_save_area at 16; the
+ * register save area has the 6 integer registers and then the 8 SSE
+ * registers, 16 bytes each.  The value is used where it is.  LLVM's
+ * va_arg instruction is not used: LLVM 18 at -O0 miscompiles it outside
+ * the entry block.
+ */
+static char *vaaddr(char *ap, int fp) {
+	char *offp = ap, *off = newreg(), *c = newreg(), *rsap = newreg();
+	char *rsa = newreg(), *ra = newreg(), *next = newreg(), *ovp = newreg();
+	char *ov = newreg(), *ov2 = newreg(), *a = newreg();
+	int reg = ++nblock, mem = ++nblock, done = ++nblock;
+
+	if (fp) {
+		offp = newreg();
+		inst("%s = getelementptr i8, ptr %s, i64 4", offp, ap);
+	}
+	inst("%s = load i32, ptr %s", off, offp);
+	inst("%s = icmp ule i32 %s, %d", c, off, fp ? 6*8 + 7*16 : 5*8);
+	inst("br i1 %s, label %%b%d, label %%b%d", c, reg, mem);
+	print("b%d:\n", reg);
+	inst("%s = getelementptr i8, ptr %s, i64 16", rsap, ap);
+	inst("%s = load ptr, ptr %s", rsa, rsap);
+	inst("%s = getelementptr i8, ptr %s, i32 %s", ra, rsa, off);
+	inst("%s = add i32 %s, %d", next, off, fp ? 16 : 8);
+	inst("store i32 %s, ptr %s", next, offp);
+	inst("br label %%b%d", done);
+	print("b%d:\n", mem);
+	inst("%s = getelementptr i8, ptr %s, i64 8", ovp, ap);
+	inst("%s = load ptr, ptr %s", ov, ovp);
+	inst("%s = getelementptr i8, ptr %s, i64 8", ov2, ov);
+	inst("store ptr %s, ptr %s", ov2, ovp);
+	inst("br label %%b%d", done);
+	print("b%d:\n", done);
+	inst("%s = phi ptr [ %s, %%b%d ], [ %s, %%b%d ]", a, ra, reg, ov, mem);
+	return a;
+}
+
+/*
+ * emitbuiltin - emit the call p to the stdarg function b.  va_arg
+ * returns the address of a scalar of the type promoted by a call (int
+ * for char and short, whose bytes come first, and double for float).
+ */
+static char *emitbuiltin(Node p, int b) {
+	char *ap, *v, *slot = vaslot(p);
+	Type ty;
+
+	assert(args && args->link == NULL);
+	ap = args->val;
+	args = NULL;
+	argtail = &args;
+	usedva = 1;
+	switch (b) {
+	case VASTART:
+		if (!variadic(cfunc->type))
+			error("`va_start' used in a function with fixed arguments\n");
+		inst("call void @llvm.va_start(ptr %s)", ap);
+		return "";
+	case VAEND:
+		inst("call void @llvm.va_end(ptr %s)", ap);
+		return "";
+	}
+	assert(b == VAARG);
+	ty = unqual(freturn(p->syms[0]->type)->type);
+	if (isstruct(ty)) {
+		error("llvm back end: va_arg of a structure is not supported\n");
+		return "null";
+	}
+	v = vaaddr(ap, isfloat(ty));
+	if (slot) {	/* float */
+		char *d = newreg(), *f = newreg();
+		inst("%s = load double, ptr %s", d, v);
+		inst("%s = fptrunc double %s to float", f, d);
+		inst("store float %s, ptr %s", f, slot);
+		v = slot;
+	}
+	return v;
+}
 
 /* ptroffset - the integer node k as an i64 byte offset, negated if neg */
 static char *ptroffset(Node k, int neg) {
@@ -463,6 +611,8 @@ static char *emitcall(Node p) {
 	struct arg *a;
 	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
 
+	if ((i = builtin(p)) != 0)
+		return emitbuiltin(p, i);
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
 		nfixed = 0;
 	else if (variadic(fty)) {
@@ -824,9 +974,12 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	int i;
 	struct laddr *a;
 	Gdata g;
+	Code cp;
+	Node r;
 
 	flushglobal();
 	infunc = 1;
+	vaslots = NULL;
 	memset(nodevals, 0, sizeof nodevals);
 	args = NULL;
 	argtail = &args;
@@ -859,6 +1012,10 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		}
 	}
 	gencode(caller, callee);
+	for (cp = codehead.next; cp; cp = cp->next)
+		if (cp->kind == Gen || cp->kind == Jump || cp->kind == Label)
+			for (r = cp->u.forest; r; r = r->link)
+				allocvaslots(r);
 	for (a = laddrs; a; a = a->link)
 		inst("%s = getelementptr i8, ptr %s, i64 %D",
 			a->q->x.name, gname(a->p), a->n);
@@ -921,6 +1078,8 @@ static void I(global)(Symbol p) {
 /* import - declare an external symbol */
 static void I(import)(Symbol p) {
 	gname(p);
+	if (strncmp(p->name, "__builtin_va_", 13) == 0)
+		return;	/* see builtin */
 	if (isfunc(p->type)) {
 		Type *proto = p->type->u.f.proto;
 		int i, n = 0;
@@ -959,6 +1118,8 @@ static void I(progend)(void) {
 	flushglobal();
 	if (usedmemcpy)
 		print("\ndeclare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n");
+	if (usedva)
+		print("\ndeclare void @llvm.va_start(ptr)\ndeclare void @llvm.va_end(ptr)\n");
 }
 
 static void I(segment)(int s) {}
