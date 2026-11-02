@@ -434,11 +434,13 @@ Tree asgn(Symbol p, Tree e) {
 			tree(INDIR+B, e->type, e, NULL));
 	else {
 		Type ty = p->type;
-		p->type = unqual(p->type);
-		if (isstruct(p->type) && p->type->u.sym->u.s.cfields) {
-			p->type->u.sym->u.s.cfields = 0;
+		p->type = unqual(p->type);	/* const may be initialized */
+		if (isvolatile(ty))
+			p->type = qual(VOLATILE, p->type);
+		if (isstruct(p->type) && unqual(p->type)->u.sym->u.s.cfields) {
+			unqual(p->type)->u.sym->u.s.cfields = 0;
 			e = asgntree(ASGN, idtree(p), e);
-			p->type->u.sym->u.s.cfields = 1;
+			unqual(p->type)->u.sym->u.s.cfields = 1;
 		} else
 			e = asgntree(ASGN, idtree(p), e);
 		p->type = ty;
