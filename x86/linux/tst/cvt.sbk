@@ -839,14 +839,10 @@ movl $0,p
 movl $0,p
 movl $0,p
 movl $0,p
-movl P,%edi
-movl %edi,p
 movl $0,P
 movl $0,P
 movl $0,P
 movl $0,P
-movl p,%edi
-movl %edi,P
 mov $0,%eax
 .LC4:
 movl %ebp,%esp
@@ -985,7 +981,6 @@ ret
 .byte 102
 .byte 32
 .byte 37
-.byte 108
 .byte 102
 .byte 10
 .byte 0

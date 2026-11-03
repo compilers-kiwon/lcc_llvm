@@ -34,7 +34,7 @@ quick(a, lb, ub) int a[]; {
 	int k, partition();
 
 	if (lb >= ub)
-		return;
+		return 0;
 	k = partition(a, lb, ub);
 	quick(a, lb, k - 1);
 	quick(a, k + 1, ub);
@@ -60,6 +60,6 @@ int partition(a, i, j) int a[]; {
 exchange(x, y) int *x, *y; {
 	int t;
 
-	printf("exchange(%d,%d)\n", x - xx, y - xx);
+	printf("exchange(%d,%d)\n", (int)(x - xx), (int)(y - xx));
 	t = *x; *x = *y; *y = t;
 }

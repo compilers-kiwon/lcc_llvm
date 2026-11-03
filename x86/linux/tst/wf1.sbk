@@ -11,8 +11,8 @@ movl %esp,%ebp
 subl $24,%esp
 movl $0,-24(%ebp)
 movl $0,next
-jmp .LC3
-.LC2:
+jmp .LC8
+.LC7:
 leal -24(%ebp),%edi
 pushl %edi
 leal -20(%ebp),%edi
@@ -20,26 +20,26 @@ pushl %edi
 call lookup
 addl $8,%esp
 incl (,%eax)
-.LC3:
+.LC8:
 leal -20(%ebp),%edi
 pushl %edi
 call getword
 addl $4,%esp
 cmpl $0,%eax
-jne .LC2
+jne .LC7
 pushl -24(%ebp)
 call tprint
 addl $4,%esp
 mov $0,%eax
-.LC1:
+.LC6:
 movl %ebp,%esp
 popl %edi
 popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf5:
-.size main,.Lf5-main
+.Lf10:
+.size main,.Lf10-main
 .globl err
 .align 16
 .type err,@function
@@ -50,22 +50,22 @@ pushl %esi
 pushl %edi
 movl %esp,%ebp
 pushl 20(%ebp)
-pushl $.LC7
+pushl $.LC12
 call printf
 addl $8,%esp
 pushl $1
 call exit
 addl $4,%esp
 mov $0,%eax
-.LC6:
+.LC11:
 movl %ebp,%esp
 popl %edi
 popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf8:
-.size err,.Lf8-err
+.Lf13:
+.size err,.Lf13-err
 .globl getword
 .align 16
 .type getword,@function
@@ -76,58 +76,58 @@ pushl %esi
 pushl %edi
 movl %esp,%ebp
 subl $8,%esp
-.LC10:
-.LC11:
+.LC15:
+.LC16:
 call getchar
 movl %eax,%edi
 movl %edi,-4(%ebp)
 cmpl $-1,%edi
-je .LC13
+je .LC18
 pushl -4(%ebp)
 call isletter
 addl $4,%esp
 cmpl $0,%eax
-je .LC10
-.LC13:
+je .LC15
+.LC18:
 movl 20(%ebp),%edi
 movl %edi,-8(%ebp)
-jmp .LC17
-.LC14:
+jmp .LC22
+.LC19:
 movl -8(%ebp),%edi
 leal 1(%edi),%esi
 movl %esi,-8(%ebp)
 movl -4(%ebp),%esi
 movl %esi,%ebx
 movb %bl,(,%edi)
-.LC15:
+.LC20:
 call getchar
 movl %eax,-4(%ebp)
-.LC17:
+.LC22:
 pushl -4(%ebp)
 call isletter
 addl $4,%esp
 movl %eax,-4(%ebp)
 cmpl $0,%eax
-jne .LC14
+jne .LC19
 movl -8(%ebp),%edi
 movb $0,(,%edi)
 movl -8(%ebp),%edi
 movl 20(%ebp),%esi
 cmpl %esi,%edi
-jbe .LC18
+jbe .LC23
 mov $1,%eax
-jmp .LC9
-.LC18:
+jmp .LC14
+.LC23:
 mov $0,%eax
-.LC9:
+.LC14:
 movl %ebp,%esp
 popl %edi
 popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf20:
-.size getword,.Lf20-getword
+.Lf25:
+.size getword,.Lf25-getword
 .globl isletter
 .align 16
 .type isletter,@function
@@ -139,29 +139,29 @@ pushl %edi
 movl %esp,%ebp
 movl 20(%ebp),%edi
 cmpl $65,%edi
-jl .LC22
+jl .LC27
 cmpl $90,%edi
-jg .LC22
+jg .LC27
 addl $32,20(%ebp)
-.LC22:
+.LC27:
 movl 20(%ebp),%edi
 cmpl $97,%edi
-jl .LC24
+jl .LC29
 cmpl $122,%edi
-jg .LC24
+jg .LC29
 movl 20(%ebp),%eax
-jmp .LC21
-.LC24:
+jmp .LC26
+.LC29:
 mov $0,%eax
-.LC21:
+.LC26:
 movl %ebp,%esp
 popl %edi
 popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf26:
-.size isletter,.Lf26-isletter
+.Lf31:
+.size isletter,.Lf31-isletter
 .globl lookup
 .align 16
 .type lookup,@function
@@ -175,16 +175,16 @@ subl $4,%esp
 movl 24(%ebp),%edi
 movl (,%edi),%edi
 cmpl $0,%edi
-je .LC28
+je .LC33
 movl 24(%ebp),%edi
 movl (,%edi),%edi
 pushl 12(%edi)
 pushl 20(%ebp)
-call strcmp
+call wstrcmp
 addl $8,%esp
 movl %eax,-4(%ebp)
 cmpl $0,-4(%ebp)
-jge .LC30
+jge .LC35
 movl 24(%ebp),%edi
 movl (,%edi),%edi
 leal 4(%edi),%edi
@@ -193,10 +193,10 @@ pushl 20(%ebp)
 call lookup
 addl $8,%esp
 movl %eax,%edi
-jmp .LC27
-.LC30:
+jmp .LC32
+.LC35:
 cmpl $0,-4(%ebp)
-jle .LC32
+jle .LC37
 movl 24(%ebp),%edi
 movl (,%edi),%edi
 leal 8(%edi),%edi
@@ -205,18 +205,18 @@ pushl 20(%ebp)
 call lookup
 addl $8,%esp
 movl %eax,%edi
-jmp .LC27
-.LC32:
+jmp .LC32
+.LC37:
 movl 24(%ebp),%edi
 movl (,%edi),%eax
-jmp .LC27
-.LC28:
+jmp .LC32
+.LC33:
 cmpl $2000,next
-jl .LC34
-pushl $.LC36
+jl .LC39
+pushl $.LC41
 call err
 addl $4,%esp
-.LC34:
+.LC39:
 movl next,%edi
 sall $4,%edi
 movl $0,words(%edi)
@@ -238,11 +238,11 @@ movl next,%edi
 sall $4,%edi
 movl words+12(%edi),%edi
 cmpl $0,%edi
-jne .LC40
-pushl $.LC43
+jne .LC45
+pushl $.LC48
 call err
 addl $4,%esp
-.LC40:
+.LC45:
 pushl 20(%ebp)
 movl next,%edi
 sall $4,%edi
@@ -257,15 +257,15 @@ leal words(%edi),%edi
 movl 24(%ebp),%esi
 movl %edi,(,%esi)
 movl %edi,%eax
-.LC27:
+.LC32:
 movl %ebp,%esp
 popl %edi
 popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf45:
-.size lookup,.Lf45-lookup
+.Lf50:
+.size lookup,.Lf50-lookup
 .globl tprint
 .align 16
 .type tprint,@function
@@ -277,7 +277,7 @@ pushl %edi
 movl %esp,%ebp
 movl 20(%ebp),%edi
 cmpl $0,%edi
-je .LC47
+je .LC52
 movl 20(%ebp),%edi
 pushl 4(%edi)
 call tprint
@@ -285,72 +285,15 @@ addl $4,%esp
 movl 20(%ebp),%edi
 pushl 12(%edi)
 pushl (,%edi)
-pushl $.LC49
+pushl $.LC54
 call printf
 addl $12,%esp
 movl 20(%ebp),%edi
 pushl 8(%edi)
 call tprint
 addl $4,%esp
-.LC47:
-mov $0,%eax
-.LC46:
-movl %ebp,%esp
-popl %edi
-popl %esi
-popl %ebx
-popl %ebp
-ret
-.Lf50:
-.size tprint,.Lf50-tprint
-.globl strcmp
-.align 16
-.type strcmp,@function
-strcmp:
-pushl %ebp
-pushl %ebx
-pushl %esi
-pushl %edi
-movl %esp,%ebp
-jmp .LC53
 .LC52:
-movl 20(%ebp),%edi
-leal 1(%edi),%esi
-movl %esi,20(%ebp)
-movsbl (,%edi),%edi
-cmpl $0,%edi
-jne .LC55
 mov $0,%eax
-jmp .LC51
-.LC55:
-incl 24(%ebp)
-.LC53:
-movl 20(%ebp),%edi
-movsbl (,%edi),%edi
-movl 24(%ebp),%esi
-movsbl (,%esi),%esi
-cmpl %esi,%edi
-je .LC52
-movl 20(%ebp),%edi
-movsbl (,%edi),%edi
-cmpl $0,%edi
-jne .LC57
-mov $-1,%eax
-jmp .LC51
-.LC57:
-movl 24(%ebp),%edi
-movsbl (,%edi),%edi
-cmpl $0,%edi
-jne .LC59
-mov $1,%eax
-jmp .LC51
-.LC59:
-movl 20(%ebp),%edi
-movsbl (,%edi),%edi
-movl 24(%ebp),%esi
-movsbl (,%esi),%esi
-movl %edi,%eax
-subl %esi,%eax
 .LC51:
 movl %ebp,%esp
 popl %edi
@@ -358,8 +301,65 @@ popl %esi
 popl %ebx
 popl %ebp
 ret
-.Lf61:
-.size strcmp,.Lf61-strcmp
+.Lf55:
+.size tprint,.Lf55-tprint
+.globl wstrcmp
+.align 16
+.type wstrcmp,@function
+wstrcmp:
+pushl %ebp
+pushl %ebx
+pushl %esi
+pushl %edi
+movl %esp,%ebp
+jmp .LC58
+.LC57:
+movl 20(%ebp),%edi
+leal 1(%edi),%esi
+movl %esi,20(%ebp)
+movsbl (,%edi),%edi
+cmpl $0,%edi
+jne .LC60
+mov $0,%eax
+jmp .LC56
+.LC60:
+incl 24(%ebp)
+.LC58:
+movl 20(%ebp),%edi
+movsbl (,%edi),%edi
+movl 24(%ebp),%esi
+movsbl (,%esi),%esi
+cmpl %esi,%edi
+je .LC57
+movl 20(%ebp),%edi
+movsbl (,%edi),%edi
+cmpl $0,%edi
+jne .LC62
+mov $-1,%eax
+jmp .LC56
+.LC62:
+movl 24(%ebp),%edi
+movsbl (,%edi),%edi
+cmpl $0,%edi
+jne .LC64
+mov $1,%eax
+jmp .LC56
+.LC64:
+movl 20(%ebp),%edi
+movsbl (,%edi),%edi
+movl 24(%ebp),%esi
+movsbl (,%esi),%esi
+movl %edi,%eax
+subl %esi,%eax
+.LC56:
+movl %ebp,%esp
+popl %edi
+popl %esi
+popl %ebx
+popl %ebp
+ret
+.Lf66:
+.size wstrcmp,.Lf66-wstrcmp
 .bss
 .globl next
 .align 4
@@ -371,9 +371,13 @@ ret
 .type words,@object
 .size words,32000
 .comm words,32000
+.align 4
+.type __va_arg_tmp,@object
+.size __va_arg_tmp,4
+.lcomm __va_arg_tmp,4
 .data
 .align 1
-.LC49:
+.LC54:
 .byte 37
 .byte 100
 .byte 9
@@ -382,7 +386,7 @@ ret
 .byte 10
 .byte 0
 .align 1
-.LC43:
+.LC48:
 .byte 111
 .byte 117
 .byte 116
@@ -404,7 +408,7 @@ ret
 .byte 101
 .byte 0
 .align 1
-.LC36:
+.LC41:
 .byte 111
 .byte 117
 .byte 116
@@ -426,7 +430,7 @@ ret
 .byte 101
 .byte 0
 .align 1
-.LC7:
+.LC12:
 .byte 63
 .byte 32
 .byte 37

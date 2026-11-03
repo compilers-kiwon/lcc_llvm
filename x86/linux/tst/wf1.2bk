@@ -1,2 +1,2 @@
-tst/wf1.c:29: warning: missing return value
-tst/wf1.c:87: warning: missing return value
+tst/wf1.c:32: warning: missing return value
+tst/wf1.c:89: warning: missing return value

@@ -13,7 +13,7 @@ void *p;
 void (*P)(void);
 
 void print(void) {
-	printf("%d %d %d %ld %u %u %u %lu %f %f %lf\n",c,s,i,l,C,S,I,L,f,d,D);
+	printf("%d %d %d %ld %u %u %u %lu %f %f %f\n",c,s,i,l,C,S,I,L,f,d,(double)D);
 }
 
 main() {
@@ -29,7 +29,7 @@ main() {
 	d=10; c=d;s=d;i=d;l=d;C=d;S=d;I=d;L=d;f=d;    D=d; print();
 	D=11; c=D;s=D;i=D;l=D;C=D;S=D;I=D;L=D;f=D;d=D;     print();
 
-	p=0; p=0L; p=0U; p=0UL; p=P;
-	P=0; P=0L; P=0U; P=0UL; P=p;
+	p=0; p=0L; p=0U; p=0UL;
+	P=0; P=0L; P=0U; P=0UL;
 	return 0;
 }

@@ -175,7 +175,9 @@ jmp .LC21
 movl -4(%ebp),%edi
 leal 4(%edi),%edi
 movl %edi,-4(%ebp)
-movsbl -4(%edi),%edi
+movl -4(%edi),%edi
+movl %edi,%ebx
+movsbl %bl,%edi
 pushl %edi
 pushl $.LC31
 call printf
@@ -194,7 +196,8 @@ jmp .LC21
 movl -4(%ebp),%edi
 leal 4(%edi),%edi
 movl %edi,-4(%ebp)
-movswl -4(%edi),%edi
+movl -4(%edi),%edi
+movswl %di,%edi
 pushl %edi
 pushl $.LC35
 call printf

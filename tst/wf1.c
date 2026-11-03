@@ -1,4 +1,7 @@
 /* wf1 - print word frequencies; uses structures */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct node {
 	int count;		/* frequency count */
@@ -55,10 +58,9 @@ int isletter(c) {
 /* lookup - lookup word in tree; install if necessary */
 struct node *lookup(word, p) char *word; struct node **p; {
 	int cond;
-	char *malloc();
 
 	if (*p) {
-		cond = strcmp(word, (*p)->word);
+		cond = wstrcmp(word, (*p)->word);
 		if (cond < 0)
 			return lookup(word, &(*p)->left);
 		else if (cond > 0)
@@ -86,8 +88,8 @@ tprint(tree) struct node *tree; {
 	}
 }
 
-/* strcmp - compare s1 and s2, return <0, 0, or >0 */
-int strcmp(s1, s2) char *s1, *s2; {
+/* wstrcmp - compare s1 and s2, return <0, 0, or >0 */
+int wstrcmp(s1, s2) char *s1, *s2; {
 	while (*s1 == *s2) {
 		if (*s1++ == 0)
 			return 0;

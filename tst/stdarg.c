@@ -2,7 +2,7 @@
 
 struct node { int a[4]; } x = {1,2,3,4};
 
-print(char *fmt, ...);
+int print(char *fmt, ...);
 
 main() {
 	print("test 1\n");
@@ -14,7 +14,7 @@ main() {
 	return 0;
 }
 
-print(char *fmt, ...) {
+int print(char *fmt, ...) {
 	va_list ap;
 
 	va_start(ap, fmt);
@@ -27,13 +27,13 @@ print(char *fmt, ...) {
 				break;
 				}
 			case 'c':
-				printf("%c", va_arg(ap, char));
+				printf("%c", (char)va_arg(ap, int));
 				break;
 			case 'd':
 				printf("%d", va_arg(ap, int));
 				break;
 			case 'w':
-				printf("%x", va_arg(ap, short));
+				printf("%x", (short)va_arg(ap, int));
 				break;
 			case 's':
 				printf("%s", va_arg(ap, char *));
