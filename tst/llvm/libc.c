@@ -270,6 +270,8 @@ static double limitsv[] = {
 	FLT_MIN_10_EXP, FLT_MAX_EXP, FLT_MAX, FLT_MAX_10_EXP,
 	DBL_MANT_DIG, DBL_EPSILON, DBL_DIG, DBL_MIN_EXP, DBL_MIN, DBL_MIN_10_EXP,
 	DBL_MAX_EXP, DBL_MAX, DBL_MAX_10_EXP,
+	LDBL_DIG, LDBL_MANT_DIG, LDBL_MAX_10_EXP, LDBL_MAX_EXP, LDBL_MIN_10_EXP, LDBL_MIN_EXP,
+	1-FLT_MIN_10_EXP, 1-FLT_MIN_EXP, 1-DBL_MIN_10_EXP, 1-DBL_MIN_EXP, 1-LDBL_MIN_10_EXP, 1-LDBL_MIN_EXP,
 	EDOM, ERANGE, EOF, BUFSIZ, FILENAME_MAX, L_tmpnam, TMP_MAX, FOPEN_MAX,
 	SEEK_SET, SEEK_CUR, SEEK_END, _IOFBF, _IOLBF, _IONBF, EXIT_SUCCESS, EXIT_FAILURE, RAND_MAX,
 	CLOCKS_PER_SEC, SIGABRT, SIGFPE, SIGILL, SIGINT, SIGSEGV, SIGTERM,
@@ -285,6 +287,13 @@ double limit(int i) {
 	if (i == NLIMITS - 1)
 		return HUGE_VAL;	/* 1e10000 for lcc, which glibc warns about */
 	return limitsv[i];
+}
+
+/* the long double limits, which a double cannot hold */
+static long double ldlimitsv[] = { LDBL_EPSILON, LDBL_MAX, LDBL_MIN, 1 + LDBL_EPSILON, LDBL_MAX / 3 };
+#define NLDLIMITS (sizeof ldlimitsv / sizeof ldlimitsv[0])
+long double ldlimit(int i) {
+	return ldlimitsv[i];
 }
 
 #define NMB 6

@@ -13,6 +13,7 @@
 #define stdios r_stdios
 #define locales r_locales
 #define limit r_limit
+#define ldlimit r_ldlimit
 #define mbs r_mbs
 #include "libc.c"
 #undef ctypes
@@ -26,10 +27,11 @@
 #undef stdios
 #undef locales
 #undef limit
+#undef ldlimit
 #undef mbs
 int ctypes(int); double mathf(int, double, double); long convs(int, char *), strings(int, char *);
 long sorts(int), jumps(int); int signals(int); long times(int, char *), stdios(int, char *);
-long locales(int, char *); double limit(int); long mbs(int);
+long locales(int, char *); double limit(int); long mbs(int); long double ldlimit(int);
 static int bad, n;
 #define CHK(e, w, fmt) do { n++; if ((e) != (w)) { bad++; printf("%s: " fmt " != " fmt "\n", #e, e, w); } } while (0)
 #define CHKS(a, b) do { n++; if (strcmp(a, b) != 0) { bad++; printf("line %d: \"%s\" != \"%s\"\n", __LINE__, a, b); } } while (0)
@@ -78,6 +80,11 @@ int main(void) {
 	}
 	for (i = 0; i < (int)NLIMITS; i++)
 		CHK(limit(i), r_limit(i), "%g");
+	for (i = 0; i < (int)NLDLIMITS; i++) {
+		long double a = ldlimit(i), b = r_ldlimit(i);
+		n++;
+		if (memcmp(&a, &b, 10) != 0) { bad++; printf("ldlimit(%d): %.21Lg != %.21Lg\n", i, a, b); }
+	}
 	for (f = 0; f < NMB; f++)
 		CHK(mbs(f), r_mbs(f), "%ld");
 	printf("%d checks, %d bad\n", n, bad);
