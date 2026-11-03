@@ -188,7 +188,16 @@ Tree cnsttree(Type ty, ...) {
 	switch (ty->op) {
 	case INT:     p->u.v.i = va_arg(ap, long); break;
 	case UNSIGNED:p->u.v.u = va_arg(ap, unsigned long)&ones(8*ty->size); break;
-	case FLOAT:   p->u.v.d = va_arg(ap, long double); break;
+	case FLOAT:   p->u.v.d = va_arg(ap, long double);
+		/* a value of the type, as at run time: float and double have
+		   4 and 8 bytes; those out of range are left alone */
+		if (p->u.v.d >= ty->u.sym->u.limits.min.d
+		&&  p->u.v.d <= ty->u.sym->u.limits.max.d)
+			if (ty->size == 4)
+				p->u.v.d = (float)p->u.v.d;
+			else if (ty->size == 8)
+				p->u.v.d = (double)p->u.v.d;
+		break;
 	case POINTER: p->u.v.p = va_arg(ap, void *); break;
 	default: assert(0);
 	}

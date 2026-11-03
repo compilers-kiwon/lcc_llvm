@@ -13,6 +13,7 @@ int d2i(double), f2i(float); long d2l(double), f2l(float);
 unsigned d2u(double), f2u(float); unsigned long d2ul(double), f2ul(float); char d2c(double);
 double f2d(float); float d2f(double); double viald(double), viald2(double); float fneg(float);
 long double d2ld(double), ul2ld(unsigned long); double ld2d(long double); unsigned long ld2ul(long double);
+int fconst(void); float fconst2(int);
 double mix(float, double, int, long); float fmix(float, int); long round_down(double);
 static int bad, n;
 #define CHK(e, w) do { __typeof__(w) x_ = (e), w_ = (w); n++; \
@@ -61,6 +62,11 @@ int main(void) {
 			CHK(fmix(f, k), f * k + 0.5f);
 		}
 	}
+	CHK(fconst(), ((float)0.1 == 0.1f) | (0.1f == 0.1) << 1 | ((double)0.1f == 0.1) << 2
+		| (16777217.0f == 16777216.0f) << 3 | (3.4028235e38f == (float)3.4028235e38) << 4
+		| (1.00000006f == 1.0f) << 5 | (0.3f == 0.1f + 0.2f) << 6);
+	{ static float t[] = { 0.1f, 16777217.0f, 1.00000006f, 1e-45f, 3.4028235e38f, 0.1f + 0.2f };
+	  for (i = 0; i < 6; i++) CHK(fconst2(i), t[i]); }
 	printf("%d checks, %d bad\n", n, bad);
 	return bad != 0;
 }
