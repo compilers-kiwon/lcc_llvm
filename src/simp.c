@@ -258,15 +258,24 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			xcvtcnst(F,l->u.v.d,ty,i,(long)l->u.v.d);
 			break;
 		case CVF+F: {
-			float d;
-			if (l->op == CNST+F)
+			long double d;
+			if (l->op == CNST+F) {
 				if (l->u.v.d < ty->u.sym->u.limits.min.d)
 					d = ty->u.sym->u.limits.min.d;
 				else if (l->u.v.d > ty->u.sym->u.limits.max.d)
 					d = ty->u.sym->u.limits.max.d;
 				else
 					d = l->u.v.d;
-			xcvtcnst(F,l->u.v.d,ty,d,(long double)d);
+				/* round to the source, since a float constant
+				   keeps the digits it was written with, and then to
+				   the destination; float and double have 4 and 8
+				   bytes, and a long double may be wider */
+				if (l->type->size == 4 || ty->size == 4)
+					d = (float)d;
+				else if (l->type->size == 8 || ty->size == 8)
+					d = (double)d;
+			}
+			xcvtcnst(F,l->u.v.d,ty,d,d);
 			break;
 			}
 		case BAND+U:
