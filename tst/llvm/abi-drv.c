@@ -35,7 +35,9 @@ double lt_press1(long, long, long, long, long, struct l2, long);
 double lt_press2(double, double, double, double, double, double, double, struct d2, double);
 double lt_press3(struct i2, struct id, struct f2, struct l3, struct di, struct i3, struct l2, struct fi);
 double lt_press4(int, struct d2, struct d2, struct d2, struct d2, struct f1, float);
-double lc_press(int, int), lc_var(int), lc_noproto(int);
+double lc_press(int, int), lc_var(int), lc_noproto(int), lcr_noproto(int);
+struct l3 dk_l3(int k) { struct l3 s; fill_l3(&s, k); return s; }
+struct i2 dk_i2(int k) { struct i2 s; fill_i2(&s, k); return s; }
 double lvs(const char *, ...), lc_vs(int, int, int);
 double dvs(const char *fmt, ...) {
 	va_list ap; double s;
@@ -127,6 +129,8 @@ int main(void) {
 			CHK(lt_press4(k, d2a, d2b, d2c, d2d, f1, k + 0.5f), w); CHK(lc_press(k, 4), w); CHK(lc_press(k, 14), w);
 			CHK(lc_var(k), dv(6, i3, f3, di, l3, d2a, l2, k + 0.5));
 			CHK(lc_noproto(k), dt_i3(i3) + 2 * dt_ffi(ffi) + 3 * dt_l3(l3));
+			{ struct l3 c; fill_l3(&c, k + 1);
+			  CHK(lcr_noproto(k), sum_l3(&l3) + 2 * sum_i2(&i2) + 3 * sum_l3(&c)); }
 		}
 		{
 			struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f2;

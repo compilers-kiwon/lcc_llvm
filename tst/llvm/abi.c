@@ -159,6 +159,17 @@ double lc_vs(int k, int which, int self) {
 	return 0;
 }
 
+/* results through declarations without a prototype: the address of a
+   result in memory is still a fixed argument */
+struct l3 dk_l3();
+struct i2 dk_i2();
+struct l3 (*dkp)() = dk_l3;
+double lcr_noproto(int k) {
+	struct l3 a, c; struct i2 b;
+	a = dk_l3(k); b = dk_i2(k); c = (*dkp)(k + 1);
+	return sum_l3(&a) + 2 * sum_i2(&b) + 3 * sum_l3(&c);
+}
+
 /* through a declaration without a prototype */
 double dt_i3(), dt_ffi(), dt_l3();
 double lc_noproto(int k) {

@@ -955,12 +955,11 @@ static char *emitcall(Node p) {
 	}
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
 		nfixed = 0;
-	else if (variadic(fty)) {
+	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
-		if (nres == 0 && isstruct(rty))	/* the result address */
-			nfixed++;
-	}
+	if (nfixed >= 0 && nres == 0 && isstruct(rty))
+		nfixed++;	/* the result address is fixed: sret is not allowed in ... */
 	if (optype(p->op) != V && (isint(rty) || isenum(rty))
 	&& rty->size < opsize(p->op)) {
 		/* the upper bits of a char or short result are undefined */
