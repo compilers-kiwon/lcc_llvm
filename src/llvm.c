@@ -1,4 +1,5 @@
 #include "c.h"
+#include "sysv.h"
 
 /*
  * LLVM back end: emits textual LLVM IR (.ll) for llvm/x86_64-linux.
@@ -185,142 +186,10 @@ static char *argtypestr(Type ty) {
 	return typestr(ty);
 }
 
-/*
- * SysV x86-64 passes a structure or union of at most 16 bytes in up to
- * two registers, one for each eightbyte: an SSE register if it holds
- * only floats and doubles, else an integer register.  Larger ones, ones
- * with a long double (classes X87 and X87UP, also MEMORY when merged
- * with another class), and ones for which too few of the 6 integer and
- * 8 SSE argument registers are left, are copied to the stack (byval).
- */
-enum { INTEGER = 1, SSE, X87, X87UP, MEMORY };
-
-/* merge - the class of an eightbyte with scalars of classes a and b */
-static int merge(int a, int b) {
-	if (a == b || b == 0)
-		return a;
-	if (a == 0)
-		return b;
-	if (a == MEMORY || b == MEMORY
-	|| a == X87 || a == X87UP || b == X87 || b == X87UP)
-		return MEMORY;
-	if (a == INTEGER || b == INTEGER)
-		return INTEGER;
-	return SSE;
-}
-
-/* classify - merge the classes of the scalars in ty at offset off */
-static void classify(Type ty, int off, int cls[]) {
-	ty = unqual(ty);
-	if (isstruct(ty)) {
-		Field f;
-		for (f = ty->u.sym->u.s.flist; f; f = f->link)
-			classify(f->type, off + f->offset, cls);
-	} else if (isarray(ty)) {
-		int i;
-		for (i = 0; ty->type->size > 0 && i < ty->size/ty->type->size; i++)
-			classify(ty->type, off + i*ty->type->size, cls);
-	} else if (isfloat(ty) && ty->size > 8) {	/* long double */
-		cls[off/8] = merge(cls[off/8], X87);
-		cls[off/8 + 1] = merge(cls[off/8 + 1], X87UP);
-	} else if (isfloat(ty))
-		cls[off/8] = merge(cls[off/8], SSE);
-	else
-		cls[off/8] = merge(cls[off/8], INTEGER);
-}
-
-/* classes - set cls[0..1] to the classes of the structure ty of at
-   most 16 bytes; return how many eightbytes it has */
-static int classes(Type ty, int cls[]) {
-	cls[0] = cls[1] = 0;
-	classify(ty, 0, cls);
-	return (ty->size + 7)/8;
-}
-
-/* free argument registers while arguments are assigned to them */
-struct regs {
-	int gp, fp;
-};
-
-/*
- * structparts - set part[] to the LLVM types of the registers that pass
- * the structure ty and take them from r; return how many, or 0 if ty
- * goes on the stack.  The last part covers only the bytes left, so
- * that it is not loaded or stored beyond the structure.
- */
-static int structparts(Type ty, struct regs *r, char *part[]) {
-	int cls[2], i, n, ngp = 0, nfp = 0;
-
-	ty = unqual(ty);
-	if (ty->size == 0 || ty->size > 16)
-		return 0;
-	n = classes(ty, cls);
-	for (i = 0; i < n; i++)
-		if (cls[i] == X87 || cls[i] == X87UP || cls[i] == MEMORY)
-			return 0;
-		else if (cls[i] == SSE)
-			nfp++;
-		else
-			ngp++;
-	if (ngp > r->gp || nfp > r->fp)
-		return 0;
-	r->gp -= ngp;
-	r->fp -= nfp;
-	for (i = 0; i < n; i++) {
-		int bytes = ty->size - 8*i < 8 ? ty->size - 8*i : 8;
-		if (cls[i] == SSE)
-			part[i] = bytes > 4 ? "double" : "float";
-		else
-			part[i] = stringf("i%d", 8*bytes);
-	}
-	return n;
-}
-
-/* ssepart - whether the LLVM type t goes in an SSE register */
-static int ssepart(char *t) {
-	return strcmp(t, "float") == 0 || strcmp(t, "double") == 0;
-}
-
-/* scalarreg - take a register for a scalar argument of LLVM type t */
-static void scalarreg(char *t, struct regs *r) {
-	if (ssepart(t)) {
-		if (r->fp > 0)
-			r->fp--;
-	} else if (strcmp(t, "x86_fp80") == 0)
-		;	/* class X87: always on the stack */
-	else if (r->gp > 0)
-		r->gp--;
-}
-
 /* byvalstr - attributes of a pointer to the structure ty on the stack */
 static char *byvalstr(Type ty) {
 	return stringf("byval([%d x i8]) align %d", ty->size,
 		ty->align < 8 ? 8 : ty->align);
-}
-
-/*
- * A structure result is classified as an argument, and returned in up
- * to two registers (rax and rdx, xmm0 and xmm1), in st0 if it has just a
- * long double, or else in memory at an address passed by the caller
- * (sret).  The
- * front end (wants_callb=0) always passes that address as the first
- * argument; for a result in registers, the back end drops it.
- */
-
-/* retparts - set part[] to the registers of the structure result ty;
-   return how many, or 0 if ty is returned in memory */
-static int retparts(Type ty, char *part[]) {
-	struct regs r;
-	int cls[2];
-
-	ty = unqual(ty);
-	if (ty->size == 16 && classes(ty, cls) == 2
-	&& cls[0] == X87 && cls[1] == X87UP) {	/* in st0, like a long double */
-		part[0] = "x86_fp80";
-		return 1;
-	}
-	r.gp = r.fp = 2;
-	return structparts(ty, &r, part);
 }
 
 /* sretstr - attributes of the address of the structure result ty */
@@ -334,7 +203,7 @@ static char *rettypestr(Type fty) {
 
 	if (isstruct(rty)) {
 		char *part[2];
-		switch (retparts(rty, part)) {
+		switch (sysv_retparts(rty, part)) {
 		case 0: return "void";
 		case 1: return part[0];
 		default: return stringf("{ %s, %s }", part[0], part[1]);
@@ -368,42 +237,16 @@ static void hexdigits(char *buf, int i, int n, unsigned long u) {
 /* fp80str - d as an x87 80-bit constant: 0xK, then the sign and the
    15-bit biased exponent, then the 64-bit significand with its leading 1 */
 static char *fp80str(long double d) {
-	unsigned long hi = 0, lo = 0;
-	int sign = 0, e = 0;
+	char buf[24];
+	unsigned se;
+	unsigned long hi, lo;
 
-	if (d != d)	/* NaN: the quiet one */
-		return "0xK7FFFC000000000000000";
-	if (d < 0 || d == 0 && 1/d < 0) {
-		sign = 1;
-		d = -d;
-	}
-	if (d - d != 0)	/* infinity */
-		e = 0x7FFF, hi = 0x80000000UL;
-	else if (d != 0) {
-		long double m;
-		e = 16383;	/* bias; d = m * 2**(e - bias), 1 <= m < 2 */
-		while (d >= 2) {
-			d /= 2;
-			e++;
-		}
-		while (d < 1 && e > 1) {
-			d *= 2;
-			e--;
-		}
-		if (d < 1)	/* subnormal: exponent field 0, scale 2**(1 - bias) */
-			e = 0;
-		m = d*2147483648.0;	/* 2**31: the top 32 bits */
-		hi = (unsigned long)m;
-		lo = (unsigned long)((m - hi)*4294967296.0);
-	}
-	{
-		char buf[24];
-		hexdigits(buf, 3, 4, sign<<15 | e);
-		hexdigits(buf, 7, 8, hi);
-		hexdigits(buf, 15, 8, lo);
-		buf[0] = '0', buf[1] = 'x', buf[2] = 'K', buf[23] = 0;
-		return string(buf);
-	}
+	sysv_fp80bits(d, &se, &hi, &lo);
+	hexdigits(buf, 3, 4, se);
+	hexdigits(buf, 7, 8, hi);
+	hexdigits(buf, 15, 8, lo);
+	buf[0] = '0', buf[1] = 'x', buf[2] = 'K', buf[23] = 0;
+	return string(buf);
 }
 
 /* floatstr - floating constant d of size bytes, in LLVM's hex form */
@@ -467,22 +310,6 @@ static void emitalloca(Symbol p) {
 static char *nodeval(Node), *emitcall(Node);
 
 /*
- * returnstwice - whether the function named name can return twice, as
- * setjmp does; LLVM must know, since locals may change between the
- * returns.  The names are those that clang knows.
- */
-static int returnstwice(char *name) {
-	static char *names[] = { "setjmp", "_setjmp", "sigsetjmp",
-		"__sigsetjmp", "savectx", "vfork", "getcontext", NULL };
-	int i;
-
-	for (i = 0; names[i]; i++)
-		if (strcmp(name, names[i]) == 0)
-			return 1;
-	return 0;
-}
-
-/*
  * builtin - which stdarg function the call p is to, or 0.  stdarg.h
  * declares __builtin_va_start and __builtin_va_end, and the front end
  * makes __builtin_va_arg(ap, T) a call to a __builtin_va_arg returning
@@ -516,24 +343,6 @@ static char *vaslot(Node p) {
 }
 
 /*
- * needsslot - whether a va_arg of type ty needs a place for its value
- * because it is not in the argument area as it is: a float arrives as a
- * double, and a structure in an SSE register and another register is
- * split in the register save area
- */
-static int needsslot(Type ty) {
-	struct regs r;
-	char *part[2];
-
-	r.gp = 6;
-	r.fp = 8;
-	if (isstruct(ty))
-		return structparts(ty, &r, part) == 2
-			&& (ssepart(part[0]) || ssepart(part[1]));
-	return isfloat(ty) && ty->size < doubletype->size;
-}
-
-/*
  * allocvaslots - make an entry block place for each va_arg call in dag
  * p that needs one.  The call returns the address of its value.
  */
@@ -543,7 +352,7 @@ static void allocvaslots(Node p) {
 	if (p == NULL)
 		return;
 	if (generic(p->op) == CALL && builtin(p) == VAARG && vaslot(p) == NULL
-	&& needsslot(ty = unqual(freturn(p->syms[0]->type)->type))) {
+	&& sysv_needsslot(ty = unqual(freturn(p->syms[0]->type)->type))) {
 		struct vaslot *s;
 		NEW(s, FUNC);
 		s->call = p;
@@ -578,7 +387,7 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 	if (isstruct(ty)) {
 		r.gp = 6;
 		r.fp = 8;
-		n = structparts(ty, &r, part);
+		n = sysv_structparts(ty, &r, part);
 	} else if (isfloat(ty) && ty->size > 8)
 		n = 0;	/* long double, class X87: always on the stack */
 	else {	/* promoted */
@@ -586,7 +395,7 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 		part[0] = isfloat(ty) ? "double" : "i64";
 	}
 	for (i = 0; i < n; i++)
-		if (ssepart(part[i]))
+		if (sysv_ssepart(part[i]))
 			nfp++;
 		else
 			ngp++;
@@ -627,14 +436,14 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 			int ig = 0, is = 0;
 			for (i = 0; i < n; i++) {
 				char *src = newreg(), *dst = slot, *v = newreg();
-				if (ssepart(part[i]))
+				if (sysv_ssepart(part[i]))
 					inst("%s = getelementptr i8, ptr %s, i32 %s", src, rsa, fp);
 				else
 					inst("%s = getelementptr i8, ptr %s, i32 %s", src, rsa, gp);
-				if (ssepart(part[i]) ? is++ : ig++) {
+				if (sysv_ssepart(part[i]) ? is++ : ig++) {
 					char *s2 = newreg();
 					inst("%s = getelementptr i8, ptr %s, i64 %d", s2, src,
-						ssepart(part[i]) ? 16 : 8);
+						sysv_ssepart(part[i]) ? 16 : 8);
 					src = s2;
 				}
 				if (i > 0) {
@@ -947,7 +756,7 @@ static char *emitcall(Node p) {
 	if (isstruct(rty)) {	/* args has its address first */
 		assert(args && args->type && strcmp(args->type, "ptr") == 0);
 		res = args;
-		if ((nres = retparts(rty, rpart)) > 0) {
+		if ((nres = sysv_retparts(rty, rpart)) > 0) {
 			args = args->link;
 			rt = rettypestr(fty);
 		} else
@@ -975,8 +784,8 @@ static char *emitcall(Node p) {
 		int j, n = 0;
 		a->fixed = nfixed < 0 || i < nfixed;
 		if (a->sty == NULL)
-			scalarreg(a->type, &r);
-		else if ((n = structparts(a->sty, &r, part)) == 0) {
+			sysv_scalarreg(a->type, &r);
+		else if ((n = sysv_structparts(a->sty, &r, part)) == 0) {
 			a->type = "ptr";
 			a->attr = byvalstr(a->sty);
 		}
@@ -1018,7 +827,7 @@ static char *emitcall(Node p) {
 			a->attr ? " " : "", a->attr ? a->attr : "", a->val);
 	print(")");
 	if (specific(p->kids[0]->op) == ADDRG+P
-	&& returnstwice(p->kids[0]->syms[0]->name))
+	&& sysv_returnstwice(p->kids[0]->syms[0]->name))
 		print(" returns_twice");
 	print("\n");
 	args = NULL;
@@ -1393,7 +1202,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		rettype, fname);
 	r.gp = 6;
 	r.fp = 8;
-	nres = isstruct(freturn(f->type)) ? retparts(freturn(f->type), rpart) : 0;
+	nres = isstruct(freturn(f->type)) ? sysv_retparts(freturn(f->type), rpart) : 0;
 	for (i = nres > 0, np = 0; caller[i]; i++) {
 		Type ty = caller[i]->type;
 		char *part[2];
@@ -1404,8 +1213,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			r.gp--;
 		} else if (!isstruct(ty)) {
 			print("%s %%a%d", typestr(ty), i);
-			scalarreg(typestr(ty), &r);
-		} else if ((n = structparts(ty, &r, part)) == 0)
+			sysv_scalarreg(typestr(ty), &r);
+		} else if ((n = sysv_structparts(ty, &r, part)) == 0)
 			print("ptr %s %%a%d", byvalstr(ty), i);
 		else
 			for (j = 0; j < n; j++)
@@ -1430,8 +1239,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			p->x.name = localname(p);
 			emitalloca(p);
 			inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
-			scalarreg(typestr(p->type), &r);
-		} else if ((n = structparts(p->type, &r, part)) == 0)
+			sysv_scalarreg(typestr(p->type), &r);
+		} else if ((n = sysv_structparts(p->type, &r, part)) == 0)
 			p->x.name = stringf("%%a%d", i);	/* byval */
 		else {	/* in registers: store them */
 			p->x.name = localname(p);
@@ -1531,7 +1340,7 @@ static void I(import)(Symbol p) {
 		print("declare %s %s(", rettypestr(p->type), p->x.name);
 		r.gp = 6;
 		r.fp = 8;
-		if (isstruct(freturn(p->type)) && retparts(freturn(p->type), part) == 0) {
+		if (isstruct(freturn(p->type)) && sysv_retparts(freturn(p->type), part) == 0) {
 			print("ptr %s", sretstr(freturn(p->type)));	/* the result address */
 			n++;
 			r.gp--;
@@ -1540,8 +1349,8 @@ static void I(import)(Symbol p) {
 			for (i = 0; proto[i] && proto[i] != voidtype; i++)
 				if (!isstruct(proto[i])) {
 					print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
-					scalarreg(argtypestr(proto[i]), &r);
-				} else if ((k = structparts(proto[i], &r, part)) == 0)
+					sysv_scalarreg(argtypestr(proto[i]), &r);
+				} else if ((k = sysv_structparts(proto[i], &r, part)) == 0)
 					print("%sptr %s", n++ ? ", " : "", byvalstr(proto[i]));
 				else
 					for (j = 0; j < k; j++)
@@ -1550,7 +1359,7 @@ static void I(import)(Symbol p) {
 				print(", ...");
 		} else
 			print("%s...", n ? ", " : "");
-		print(")%s\n", returnstwice(p->name) ? " returns_twice" : "");
+		print(")%s\n", sysv_returnstwice(p->name) ? " returns_twice" : "");
 	} else
 		print("%s = external global %s\n", p->x.name, typestr(p->type));
 }

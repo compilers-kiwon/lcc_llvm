@@ -63,7 +63,8 @@ RCCOBJS=$Balloc$O \
 	$Bstab$O \
 	$Bx86$O \
 	$Bx86linux$O \
-	$Bllvm$O
+	$Bllvm$O \
+	$Bsysv$O
 
 $Brcc$E::	$Bmain$O $Blibrcc$A $(EXTRAOBJS)
 		$(LD) $(LDFLAGS) -o $@ $Bmain$O $(EXTRAOBJS) $Blibrcc$A $(EXTRALIBS)
@@ -97,6 +98,7 @@ $Bstmt$O:	src/stmt.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/stmt.c
 $Bstring$O:	src/string.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/string.c
 $Bsym$O:	src/sym.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sym.c
 $Bllvm$O:	src/llvm.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/llvm.c
+$Bsysv$O:	src/sysv.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sysv.c
 $Bsymbolic$O:	src/symbolic.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/symbolic.c
 $Bbytecode$O:	src/bytecode.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/bytecode.c
 $Btrace$O:	src/trace.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/trace.c
@@ -261,6 +263,7 @@ RCCSRCS=src/alloc.c \
 	src/gen.c \
 	src/stab.c \
 	src/llvm.c \
+	src/sysv.c \
 	$Bdagcheck.c \
 	$Balpha.c \
 	$Bmips.c \
