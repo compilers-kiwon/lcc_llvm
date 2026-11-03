@@ -34,11 +34,18 @@ struct bits { unsigned a:3, b:20; int c:5; };
 struct da3 { double a[3]; };
 struct pl { char *p; long n; };
 struct sd { short a; double b; short c; };
+struct ld1 { long double a; };
+struct ld2 { long double a, b; };
+struct ldi { long double a; int b; };
+struct cld { char c; long double x; };
+union uld { long double l; double d; };
+union uli { long double l; int i; };
 
 #define SHAPES(X) X(c1) X(c3) X(s2) X(i1) X(i2) X(ic) X(i3) X(l2) X(l3) \
 	X(f1) X(f2) X(f3) X(d1) X(d2) X(fi) X(di) X(id) X(ffi) X(cd) \
-	X(a16) X(a13) X(fa3) X(nest) X(bits) X(da3) X(pl) X(sd)
-#define USHAPES(X) X(ul) X(uf)
+	X(a16) X(a13) X(fa3) X(nest) X(bits) X(da3) X(pl) X(sd) \
+	X(ld1) X(ld2) X(ldi) X(cld)
+#define USHAPES(X) X(ul) X(uf) X(uld) X(uli)
 
 static char abitext[] = "abcdefghijklmnopqrstuvwxyz";
 
@@ -100,12 +107,26 @@ static void fill_pl(struct pl *p, int k) { p->p = abitext + (k & 15); p->n = k *
 static double sum_pl(struct pl *p) { return p->p[0] + 10.0 * p->p[1] + p->n; }
 static void fill_sd(struct sd *p, int k) { p->a = k; p->b = k * 0.75; p->c = -k; }
 static double sum_sd(struct sd *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
+/* the long double sums keep bits that a double does not have */
+static void fill_ld1(struct ld1 *p, int k) { p->a = k + 1.0L / 3; }
+static double sum_ld1(struct ld1 *p) { return (double)((p->a - 1.0L / 3) * 4096); }
+static void fill_ld2(struct ld2 *p, int k) { p->a = k * 0.5L; p->b = -k - 1.0L / 7; }
+static double sum_ld2(struct ld2 *p) { return (double)(p->a + 10 * (p->b + 1.0L / 7)); }
+static void fill_ldi(struct ldi *p, int k) { p->a = 1e4000L * k; p->b = 3 * k; }
+static double sum_ldi(struct ldi *p) { return (double)(p->a / 1e3999L) + 10.0 * p->b; }
+static void fill_cld(struct cld *p, int k) { p->c = 'A' + k; p->x = k + 1.0L / 11; }
+static double sum_cld(struct cld *p) { return p->c + 10.0 * (double)((p->x - (p->c - 'A')) * 121); }
+static void fill_uld(union uld *p, int k) { p->l = k + 1.0L / 9; }
+static double sum_uld(union uld *p) { return (double)((p->l - 1.0L / 9) * 81); }
+static void fill_uli(union uli *p, int k) { p->l = -k - 0.25L; }
+static double sum_uli(union uli *p) { return (double)p->l; }
 
 /* vsum - sum the arguments in ap, of the types given by the letters of
    fmt: a structure from VSHAPES, x double, y long */
 #define VSHAPES(X) X('a', i3) X('b', f3) X('c', di) X('d', l3) X('e', d2) \
 	X('f', l2) X('g', id) X('h', fi) X('i', c3) X('j', a13) X('k', nest) \
-	X('l', ffi) X('m', sd) X('n', f1) X('o', d1) X('p', ic)
+	X('l', ffi) X('m', sd) X('n', f1) X('o', d1) X('p', ic) \
+	X('q', ld1) X('r', ld2) X('s', cld)
 static double vsum(const char *fmt, va_list ap) {
 	double s = 0;
 	for (; *fmt; fmt++) {

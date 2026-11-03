@@ -188,11 +188,26 @@ static char *argtypestr(Type ty) {
 /*
  * SysV x86-64 passes a structure or union of at most 16 bytes in up to
  * two registers, one for each eightbyte: an SSE register if it holds
- * only floats and doubles, else an integer register.  Larger ones, and
- * ones for which too few of the 6 integer and 8 SSE argument registers
- * are left, are copied to the stack (byval).
+ * only floats and doubles, else an integer register.  Larger ones, ones
+ * with a long double (classes X87 and X87UP, also MEMORY when merged
+ * with another class), and ones for which too few of the 6 integer and
+ * 8 SSE argument registers are left, are copied to the stack (byval).
  */
-enum { INTEGER = 1, SSE };
+enum { INTEGER = 1, SSE, X87, X87UP, MEMORY };
+
+/* merge - the class of an eightbyte with scalars of classes a and b */
+static int merge(int a, int b) {
+	if (a == b || b == 0)
+		return a;
+	if (a == 0)
+		return b;
+	if (a == MEMORY || b == MEMORY
+	|| a == X87 || a == X87UP || b == X87 || b == X87UP)
+		return MEMORY;
+	if (a == INTEGER || b == INTEGER)
+		return INTEGER;
+	return SSE;
+}
 
 /* classify - merge the classes of the scalars in ty at offset off */
 static void classify(Type ty, int off, int cls[]) {
@@ -205,11 +220,21 @@ static void classify(Type ty, int off, int cls[]) {
 		int i;
 		for (i = 0; ty->type->size > 0 && i < ty->size/ty->type->size; i++)
 			classify(ty->type, off + i*ty->type->size, cls);
-	} else if (isfloat(ty)) {
-		if (cls[off/8] != INTEGER)
-			cls[off/8] = SSE;
-	} else
-		cls[off/8] = INTEGER;
+	} else if (isfloat(ty) && ty->size > 8) {	/* long double */
+		cls[off/8] = merge(cls[off/8], X87);
+		cls[off/8 + 1] = merge(cls[off/8 + 1], X87UP);
+	} else if (isfloat(ty))
+		cls[off/8] = merge(cls[off/8], SSE);
+	else
+		cls[off/8] = merge(cls[off/8], INTEGER);
+}
+
+/* classes - set cls[0..1] to the classes of the structure ty of at
+   most 16 bytes; return how many eightbytes it has */
+static int classes(Type ty, int cls[]) {
+	cls[0] = cls[1] = 0;
+	classify(ty, 0, cls);
+	return (ty->size + 7)/8;
 }
 
 /* free argument registers while arguments are assigned to them */
@@ -229,11 +254,11 @@ static int structparts(Type ty, struct regs *r, char *part[]) {
 	ty = unqual(ty);
 	if (ty->size == 0 || ty->size > 16)
 		return 0;
-	cls[0] = cls[1] = 0;
-	classify(ty, 0, cls);
-	n = (ty->size + 7)/8;
+	n = classes(ty, cls);
 	for (i = 0; i < n; i++)
-		if (cls[i] == SSE)
+		if (cls[i] == X87 || cls[i] == X87UP || cls[i] == MEMORY)
+			return 0;
+		else if (cls[i] == SSE)
 			nfp++;
 		else
 			ngp++;
@@ -275,8 +300,9 @@ static char *byvalstr(Type ty) {
 
 /*
  * A structure result is classified as an argument, and returned in up
- * to two registers (rax and rdx, xmm0 and xmm1) or, if larger than 16
- * bytes, in memory at an address passed by the caller (sret).  The
+ * to two registers (rax and rdx, xmm0 and xmm1), in st0 if it has just a
+ * long double, or else in memory at an address passed by the caller
+ * (sret).  The
  * front end (wants_callb=0) always passes that address as the first
  * argument; for a result in registers, the back end drops it.
  */
@@ -285,7 +311,14 @@ static char *byvalstr(Type ty) {
    return how many, or 0 if ty is returned in memory */
 static int retparts(Type ty, char *part[]) {
 	struct regs r;
+	int cls[2];
 
+	ty = unqual(ty);
+	if (ty->size == 16 && classes(ty, cls) == 2
+	&& cls[0] == X87 && cls[1] == X87UP) {	/* in st0, like a long double */
+		part[0] = "x86_fp80";
+		return 1;
+	}
 	r.gp = r.fp = 2;
 	return structparts(ty, &r, part);
 }
