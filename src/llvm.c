@@ -126,11 +126,17 @@ static void setval(Node p, char *val) {
 	nodevals[h] = e;
 }
 
+/* flttypestr - LLVM type of a floating type of size bytes; long double
+   is the x87 80-bit type, which takes 16 bytes */
+static char *flttypestr(int size) {
+	return size == 4 ? "float" : size == 8 ? "double" : "x86_fp80";
+}
+
 /* optypestr - LLVM type of operator op's type suffix */
 static char *optypestr(int op) {
 	switch (optype(op)) {
 	case I: case U: return stringf("i%d", 8*opsize(op));
-	case F: return opsize(op) == 4 ? "float" : "double";
+	case F: return flttypestr(opsize(op));
 	case P: return "ptr";
 	case V: return "void";
 	}
@@ -161,7 +167,7 @@ static char *typestr(Type ty) {
 	case INT: case UNSIGNED: case ENUM:
 		return stringf("i%d", 8*ty->size);
 	case FLOAT:
-		return ty->size == 4 ? "float" : "double";
+		return flttypestr(ty->size);
 	case POINTER: case FUNCTION:
 		return "ptr";
 	case VOID:
@@ -255,7 +261,9 @@ static void scalarreg(char *t, struct regs *r) {
 	if (ssepart(t)) {
 		if (r->fp > 0)
 			r->fp--;
-	} else if (r->gp > 0)
+	} else if (strcmp(t, "x86_fp80") == 0)
+		;	/* class X87: always on the stack */
+	else if (r->gp > 0)
 		r->gp--;
 }
 
@@ -316,6 +324,55 @@ static char *intstr(unsigned long u, int size) {
 	return stringf("%D", (long)u);
 }
 
+/* hexdigits - put n hex digits of u into buf[i..i+n-1] */
+static void hexdigits(char *buf, int i, int n, unsigned long u) {
+	while (n-- > 0) {
+		buf[i + n] = "0123456789ABCDEF"[u&0xF];
+		u >>= 4;
+	}
+}
+
+/* fp80str - d as an x87 80-bit constant: 0xK, then the sign and the
+   15-bit biased exponent, then the 64-bit significand with its leading 1 */
+static char *fp80str(long double d) {
+	unsigned long hi = 0, lo = 0;
+	int sign = 0, e = 0;
+
+	if (d != d)	/* NaN: the quiet one */
+		return "0xK7FFFC000000000000000";
+	if (d < 0 || d == 0 && 1/d < 0) {
+		sign = 1;
+		d = -d;
+	}
+	if (d - d != 0)	/* infinity */
+		e = 0x7FFF, hi = 0x80000000UL;
+	else if (d != 0) {
+		long double m;
+		e = 16383;	/* bias; d = m * 2**(e - bias), 1 <= m < 2 */
+		while (d >= 2) {
+			d /= 2;
+			e++;
+		}
+		while (d < 1 && e > 1) {
+			d *= 2;
+			e--;
+		}
+		if (d < 1)	/* subnormal: exponent field 0, scale 2**(1 - bias) */
+			e = 0;
+		m = d*2147483648.0;	/* 2**31: the top 32 bits */
+		hi = (unsigned long)m;
+		lo = (unsigned long)((m - hi)*4294967296.0);
+	}
+	{
+		char buf[24];
+		hexdigits(buf, 3, 4, sign<<15 | e);
+		hexdigits(buf, 7, 8, hi);
+		hexdigits(buf, 15, 8, lo);
+		buf[0] = '0', buf[1] = 'x', buf[2] = 'K', buf[23] = 0;
+		return string(buf);
+	}
+}
+
 /* floatstr - floating constant d of size bytes, in LLVM's hex form */
 static char *floatstr(long double d, int size) {
 	static union { int x; char endian; } little = { 1 };
@@ -324,6 +381,8 @@ static char *floatstr(long double d, int size) {
 	char buf[2*sizeof x + 3], *s = buf;
 	int i;
 
+	if (size > 8)
+		return fp80str(d);
 	memcpy(b, &x, sizeof x);
 	*s++ = '0';
 	*s++ = 'x';
@@ -470,7 +529,8 @@ static void allocvaslots(Node p) {
  * overflow_arg_area at 8 and reg_save_area at 16; the register save
  * area has the 6 integer registers, 8 bytes each, and then the 8 SSE
  * registers, 16 bytes each.  An argument is in registers if all it
- * needs are left, else on the stack.  The value is used where it is,
+ * needs are left, else on the stack; a long double (class X87) always
+ * is, and arguments aligned to 16 are so there.  The value is used where it is,
  * except that a structure in an SSE register and another register is
  * put together in slot.  LLVM's va_arg instruction is not used: LLVM 18
  * at -O0 miscompiles it outside the entry block.
@@ -486,7 +546,9 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 		r.gp = 6;
 		r.fp = 8;
 		n = structparts(ty, &r, part);
-	} else {	/* promoted */
+	} else if (isfloat(ty) && ty->size > 8)
+		n = 0;	/* long double, class X87: always on the stack */
+	else {	/* promoted */
 		n = 1;
 		part[0] = isfloat(ty) ? "double" : "i64";
 	}
@@ -569,6 +631,14 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 	inst("%s = getelementptr i8, ptr %s, i64 8", ovp, ap);
 	ov = newreg();
 	inst("%s = load ptr, ptr %s", ov, ovp);
+	if (ty->align > 8) {	/* such arguments are aligned to 16 */
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = ptrtoint ptr %s to i64", x, ov);
+		inst("%s = add i64 %s, 15", y, x);
+		inst("%s = and i64 %s, -16", z, y);
+		inst("%s = inttoptr i64 %s to ptr", w, z);
+		ov = w;
+	}
 	ov2 = newreg();
 	inst("%s = getelementptr i8, ptr %s, i64 %d", ov2, ov, size);
 	inst("store ptr %s, ptr %s", ov2, ovp);
@@ -748,14 +818,10 @@ static char *nodeval(Node p) {
 			int from = opsize(k->op), size = opsize(p->op);
 
 			assert(from == p->syms[0]->u.c.v.i);	/* source size */
-			if (optype(p->op) == F && from == size)	/* long double */
-				v = a;
-			else {
-				v = newreg();
-				inst("%s = %s %s %s to %s", v, optype(p->op) == I ? "fptosi"
-					: from < size ? "fpext" : "fptrunc",
-					optypestr(k->op), a, optypestr(p->op));
-			}
+			v = newreg();
+			inst("%s = %s %s %s to %s", v, optype(p->op) == I ? "fptosi"
+				: from < size ? "fpext" : "fptrunc",
+				optypestr(k->op), a, optypestr(p->op));
 		}
 		break;
 	case CVI: case CVU: case CVP:
@@ -1228,7 +1294,7 @@ static void I(defconst)(int suffix, int size, Value v) {
 	case I: it->type = stringf("i%d", 8*size); it->val = intstr(v.i, size); break;
 	case U: it->type = stringf("i%d", 8*size); it->val = intstr(v.u, size); break;
 	case P: it->type = "ptr"; it->val = ptrstr(v.p); break;
-	case F: it->type = size == 4 ? "float" : "double";
+	case F: it->type = flttypestr(size);
 		it->val = floatstr(v.d, size); break;
 	default: assert(0);
 	}
@@ -1506,7 +1572,7 @@ Interface llvmIR = {
 	8, 8, 0,	/* long long */
 	4, 4, 0,	/* float */
 	8, 8, 0,	/* double */
-	8, 8, 0,	/* long double (same as double for now) */
+	16, 16, 0,	/* long double: x87 80 bits */
 	8, 8, 0,	/* T* */
 	0, 1, 0,	/* struct */
 	1,		/* little_endian */

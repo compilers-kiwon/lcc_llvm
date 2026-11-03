@@ -2,8 +2,9 @@
  * Conversions with floating types: signed integers to and from float
  * and double, unsigned ones (which the front end builds from signed
  * conversions, rounding once), float to double and back, long double
- * (the same as double here, so only inside functions), unary minus on float (done in double), and mixed
- * expressions.  Compiled by lcc; fpconv-drv.c compares the bits.
+ * (the x87 80-bit type) to and from double and unsigned long, unary
+ * minus on float (done in double), and mixed expressions.  Compiled by
+ * lcc; fpconv-drv.c compares the bits.
  */
 double i2d(int x) { return x; }
 float i2f(int x) { return x; }
@@ -28,8 +29,12 @@ char d2c(double x) { return x; }
 
 double f2d(float x) { return x; }
 float d2f(double x) { return x; }
-double viald(double x) { long double t; t = x; return t; }	/* no long double across calls: */
-double viald2(double x) { long double t; t = x; return t * 2; }	/* clang's long double differs */
+double viald(double x) { long double t; t = x; return t; }
+double viald2(double x) { long double t; t = x; return t * 2; }
+long double d2ld(double x) { return x; }
+double ld2d(long double x) { return x; }
+long double ul2ld(unsigned long x) { return x; }
+unsigned long ld2ul(long double x) { return x; }
 float fneg(float x) { return -x; }
 
 double mix(float f, double d, int i, long l) { return f * d + i / 2 - l * f; }
