@@ -4,7 +4,8 @@
 
 static char rcsid[] = "$Id$";
 
-/* C99, but glibc has it; stdlib.h declares it only outside strict C89 */
+/* C99, but glibc has them; stdlib.h declares them only outside strict C89 */
+extern float strtof(const char *, char **);
 extern long double strtold(const char *, char **);
 
 #define MAXTOKEN 32
@@ -781,7 +782,10 @@ static Symbol fcon(void) {
 	errno = 0;
 	if ((*cp == 'l' || *cp == 'L') && longdouble->size > doubletype->size)
 		tval.u.c.v.d = strtold(token, NULL);	/* more digits than a double */
-	else
+	else if ((*cp == 'f' || *cp == 'F') && floattype->size < doubletype->size) {
+		tval.u.c.v.d = strtof(token, NULL);	/* a float's value, rounded once */
+		errno = 0;	/* overflow is checked below, as before */
+	} else
 		tval.u.c.v.d = strtod(token, NULL);
 	if (errno == ERANGE)
 		warning("overflow in floating constant `%S'\n", token,
