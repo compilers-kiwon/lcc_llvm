@@ -35,7 +35,10 @@
 #
 # With lcc itself, each program is also compiled with -S and the LLVM IR
 # checked with opt -passes=verify ($OPT), since clang does not verify
-# the .ll it is given.
+# the .ll it is given.  An lcc built with etc/mlir-x86_64-linux.c emits
+# MLIR instead (-target=mlir/x86_64-linux): the .mlir is lowered to LLVM
+# IR with mlir-opt and mlir-translate as its driver does, and checked
+# with opt, all three from $MLIRBIN (default /usr/lib/llvm-21/bin).
 #
 # Results are PASS, FAIL (wrong output or exit status), CFAIL (does not
 # compile, or the IR does not verify), TIMEOUT and SKIP.  The exit status is 0 only if every test that
@@ -77,6 +80,7 @@ fi
 LCC="$LCC $LCCFLAGS"
 DRVCC=${DRVCC-clang}
 OPT=${OPT-opt}
+MLIRBIN=${MLIRBIN-/usr/lib/llvm-21/bin}
 T=${outdir:-$BUILDDIR/llvm/x86_64-linux/tst/$suite}
 mkdir -p $T || exit 1
 
@@ -189,16 +193,31 @@ compile() {
 	verify $1 $2
 }
 
-# verify name src: with lcc itself, check the LLVM IR of src; report CFAIL
+# verify name src: with lcc itself, check the IR of src; report CFAIL
 # and return 1 if it does not verify
 verify() {
 	[ $ownlcc = 1 ] || return 0
 	if ! timeout 300 $LCC -S -o $T/$1.ll $2 >/dev/null 2>&1 ||
-	   ! $OPT -passes=verify -disable-output $T/$1.ll >$T/$1.verr 2>&1; then
+	   ! verifyir $T/$1 >$T/$1.verr 2>&1; then
 		report CFAIL $1 "IR does not verify: `head -1 $T/$1.verr`"
 		return 1
 	fi
 	return 0
+}
+
+# verifyir base: verify base.ll from lcc -S; if that is MLIR (a module op
+# after any type aliases), move it to base.mlir and verify what it lowers to
+verifyir() {
+	case "`sed -n '/^!/!{p;q;}' $1.ll`" in
+	module*)
+		mv $1.ll $1.mlir &&
+		$MLIRBIN/mlir-opt --convert-arith-to-llvm --convert-cf-to-llvm \
+			--convert-func-to-llvm --reconcile-unrealized-casts \
+			--emit-bytecode $1.mlir -o $1.mlirbc &&
+		$MLIRBIN/mlir-translate --mlir-to-llvmir $1.mlirbc -o $1.ll &&
+		$MLIRBIN/opt -passes=verify -disable-output $1.ll ;;
+	*)	$OPT -passes=verify -disable-output $1.ll ;;
+	esac
 }
 
 # execute name input seconds: run $T/name; set $status
