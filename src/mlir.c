@@ -628,15 +628,29 @@ static void pinst(const char *fmt, ...) {
 	fprint(prologue, "\n");
 }
 
-/* br - end the current block with a jump to block name */
-static void br(char *name) {
+/* edge - record that the current block may jump to block name */
+static void edge(char *name) {
 	struct succ *s;
 
-	inst("cf.br ^%s", name);
 	NEW(s, FUNC);
 	s->b = blockof(name);
 	s->link = cur->succs;
 	cur->succs = s;
+}
+
+/* br - end the current block with a jump to block name */
+static void br(char *name) {
+	inst("cf.br ^%s", name);
+	edge(name);
+	terminated = 1;
+}
+
+/* condbr - end the current block with a jump to block t if c is true
+   and to block f if not */
+static void condbr(char *c, char *t, char *f) {
+	inst("cf.cond_br %s, ^%s, ^%s", c, t, f);
+	edge(t);
+	edge(f);
 	terminated = 1;
 }
 
@@ -975,10 +989,42 @@ static char *nodeval(Node p) {
 	return v;
 }
 
+/* cmppred - the predicate of integer comparison op */
+static char *cmppred(int op) {
+	int u = optype(op) == U;
+
+	switch (generic(op)) {
+	case EQ: return "eq";
+	case NE: return "ne";
+	case LT: return u ? "ult" : "slt";
+	case LE: return u ? "ule" : "sle";
+	case GT: return u ? "ugt" : "sgt";
+	case GE: return u ? "uge" : "sge";
+	}
+	assert(0);
+	return NULL;
+}
+
 static void emitnode(Node p) {
-	char *a, *v;
+	char *a, *b, *c, *v, *fall;
 
 	switch (generic(p->op)) {
+	case EQ: case NE: case LT: case LE: case GT: case GE:
+		/* jump to syms[0] if true; else fall into a new block */
+		if (optype(p->op) != I && optype(p->op) != U) {
+			unsupported(p);
+			break;
+		}
+		/* pointers are compared as integers: the front end adds CVPU */
+		a = opnd(p->kids[0], p->op);
+		b = opnd(p->kids[1], p->op);
+		c = newreg();
+		fall = stringf("b%d", ++nblock);
+		inst("%s = arith.cmpi %s, %s, %s : %s", c, cmppred(p->op), a, b,
+			optypestr(p->op));
+		condbr(c, gname(p->syms[0]), fall);
+		startblock(fall);
+		break;
 	case LABEL:
 		if (!terminated)
 			br(gname(p->syms[0]));
