@@ -870,8 +870,44 @@ static char *rettypestr(Type fty) {
 	return typestr(rty);
 }
 
+/* intop - the arith operation of integer operator op */
+static char *intop(int op) {
+	switch (generic(op)) {
+	case ADD:  return "addi";
+	case SUB:  return "subi";
+	case MUL:  return "muli";
+	case DIV:  return optype(op) == U ? "divui" : "divsi";
+	case MOD:  return optype(op) == U ? "remui" : "remsi";
+	case BAND: return "andi";
+	case BOR:  return "ori";
+	case BXOR: return "xori";
+	case LSH:  return "shli";
+	case RSH:  return optype(op) == U ? "shrui" : "shrsi";
+	}
+	assert(0);
+	return NULL;
+}
+
+/* shiftcount - the count of shift p, which is always an int, in the
+   type of the value shifted */
+static char *shiftcount(Node p) {
+	Node k = p->kids[1];
+	char *c, *v, *ty = optypestr(p->op);
+
+	if (generic(k->op) == CNST)
+		return iconst(sext(k->syms[0]->u.c.v.u, opsize(k->op)), ty);
+	c = nodeval(k);
+	if (opsize(k->op) == opsize(p->op))
+		return c;
+	v = newreg();
+	inst("%s = arith.%s %s : %s to %s", v,
+		opsize(k->op) < opsize(p->op) ? "extui" : "trunci", c,
+		optypestr(k->op), ty);
+	return v;
+}
+
 static char *nodeval(Node p) {
-	char *v = lookupval(p), *a;
+	char *v = lookupval(p), *a, *b;
 	struct gaddr *g;
 	Symbol q;
 
@@ -900,6 +936,37 @@ static char *nodeval(Node p) {
 		v = newreg();
 		inst("%s = llvm.load %s%s : !llvm.ptr -> %s", v,
 			p->volatil ? "volatile " : "", a, optypestr(p->op));
+		break;
+	case ADD: case SUB: case MUL: case DIV: case MOD:
+	case BAND: case BOR: case BXOR:
+		if (optype(p->op) != I && optype(p->op) != U)
+			return unsupported(p);
+		a = opnd(p->kids[0], p->op);
+		b = opnd(p->kids[1], p->op);
+		v = newreg();
+		inst("%s = arith.%s %s, %s : %s", v, intop(p->op), a, b,
+			optypestr(p->op));
+		break;
+	case LSH: case RSH:
+		a = opnd(p->kids[0], p->op);
+		b = shiftcount(p);
+		v = newreg();
+		inst("%s = arith.%s %s, %s : %s", v, intop(p->op), a, b,
+			optypestr(p->op));
+		break;
+	case NEG:
+		if (optype(p->op) != I)
+			return unsupported(p);
+		a = nodeval(p->kids[0]);
+		v = newreg();
+		inst("%s = arith.subi %s, %s : %s", v, iconst(0, optypestr(p->op)), a,
+			optypestr(p->op));
+		break;
+	case BCOM:
+		a = nodeval(p->kids[0]);
+		v = newreg();
+		inst("%s = arith.xori %s, %s : %s", v, a, iconst(-1, optypestr(p->op)),
+			optypestr(p->op));
 		break;
 	default:
 		return unsupported(p);
