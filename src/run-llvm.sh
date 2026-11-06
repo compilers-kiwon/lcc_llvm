@@ -10,7 +10,9 @@
 #                     without NAME.1bk only the messages are compared
 #   unit              tst/llvm/NAME.c compiled by lcc and linked with
 #                     tst/llvm/NAME-drv.c compiled by clang ($DRVCC); the driver
-#                     checks the results and must exit with 0
+#                     checks the results and must exit with 0, and each data
+#                     object of NAME.o must have the size of the object
+#                     r_NAME that the driver defines, if there is one
 #   c-testsuite DIR   DIR/tests/single-exec/*.c tagged c89; stdout+stderr
 #                     compared with NAME.c.expected, exit status must be 0
 #   torture DIR       DIR/*.c and DIR/ieee/*.c of gcc.c-torture/execute;
@@ -220,6 +222,19 @@ verifyir() {
 	esac
 }
 
+# sizes name: the data objects of $T/name.o whose copies r_NAME the unit
+# test driver defines have their sizes; print those that do not
+sizes() {
+	LC_ALL=C nm -S $T/$1.o 2>/dev/null |
+	awk 'NF == 4 && $3 ~ /^[bBdDrR]$/ { print $4, $2 }' | LC_ALL=C sort >$T/$1.sz1
+	LC_ALL=C nm -S $T/$1 2>/dev/null |
+	awk 'NF == 4 && $3 ~ /^[bBdDrR]$/ && $4 ~ /^r_/ { print substr($4, 3), $2 }' |
+	LC_ALL=C sort >$T/$1.sz2
+	LC_ALL=C join $T/$1.sz1 $T/$1.sz2 | awk '$2 != $3 {
+		printf "size of %s is 0x%s, not 0x%s\n", $1, $2, $3; bad = 1 }
+	END { exit bad }'
+}
+
 # execute name input seconds: run $T/name; set $status
 execute() {
 	timeout $3 $T/$1 <$2 >$T/$1.out 2>$T/$1.err
@@ -270,6 +285,10 @@ unit)
 		verify $n $src || continue
 		if ! $DRVCC -O0 -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS -lm >$T/$n.lerr 2>&1; then
 			report CFAIL $n "driver: `head -1 $T/$n.lerr`"
+			continue
+		fi
+		if ! sizes $n >$T/$n.szerr; then
+			report FAIL $n "`head -1 $T/$n.szerr`"
 			continue
 		fi
 		execute $n /dev/null 60
