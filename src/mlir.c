@@ -108,8 +108,8 @@ static char *typestr(Type ty) {
 	}
 }
 
-/* intstr - integer constant u of size bytes, as a signed decimal */
-static char *intstr(unsigned long u, int size) {
+/* sext - integer constant u of size bytes, sign-extended */
+static long sext(unsigned long u, int size) {
 	int bits = 8*size;
 
 	if (bits < 8*sizeof u) {
@@ -117,7 +117,7 @@ static char *intstr(unsigned long u, int size) {
 		if (u>>(bits - 1))
 			u |= ~ones(bits);
 	}
-	return stringf("%D", (long)u);
+	return (long)u;
 }
 
 /* hexdigits - put n hex digits of u into buf[i..i+n-1] */
@@ -448,7 +448,7 @@ static void emitglobal(Symbol p, Item items) {
 		ty = it->suffix == F ? flttypestr(it->size) : stringf("i%d", 8*it->size);
 		fprint(module, "%s : %s) {alignment = %d : i64} : %s\n",
 			it->suffix == F ? fltstr(it->v.d, it->size)
-			: intstr(it->suffix == I ? it->v.i : it->v.u, it->size),
+			: stringf("%D", sext(it->suffix == I ? it->v.i : it->v.u, it->size)),
 			ty, align, ty);
 		return;
 	}
@@ -503,16 +503,467 @@ static Item newitem(int kind) {
 	return it;
 }
 
+
+/*
+ * A function is written to three files: the pool, the constants and
+ * addresses of globals that the entry block makes once for the whole
+ * function; the prologue, its allocas and the stores of its
+ * parameters; and the body, block by block.  At its end the entry
+ * block and the blocks that it reaches are copied to the module: MLIR's
+ * conversions leave the operations of unreachable blocks behind.  The
+ * entry block has no name, so nothing jumps to it, as MLIR requires.
+ */
+static FILE *pool, *prologue, *body;
+
+struct succ {
+	struct block *b;
+	struct succ *link;
+};
+struct block {
+	char *name;		/* interned */
+	long start;		/* offset of its text in body */
+	int defined, reached;
+	struct succ *succs;
+	struct block *hlink;	/* in a hash chain */
+	struct block *dlink;	/* in the order of definition */
+	struct block *wlink;	/* in the work list of reach */
+};
+static struct block *bhash[256], *bfirst, **bdtail, *cur;
+static int terminated;		/* the current block has ended */
+
+/* values in the pool, by their interned keys */
+struct pooled {
+	char *key, *name;
+	struct pooled *link;
+};
+static struct pooled *poolhash[256];
+
+/* values of nodes */
+struct nodeval {
+	Node node;
+	char *val;
+	struct nodeval *link;
+};
+static struct nodeval *nodevals[512];
+
+/* addresses of locals plus constants, made by address() */
+struct laddr {
+	Symbol q, p;
+	long n;
+	struct laddr *link;
+};
+static struct laddr *laddrs, **ladtail;
+
+/* how each function is represented, decided where it is first emitted */
+enum { UNDECIDED, FUNCFUNC, LLVMFUNC };
+struct fninfo {
+	Symbol p;
+	int kind;
+	struct fninfo *link;
+};
+static struct fninfo *fninfos[256];
+
+static int nreg, nblock, nlocal, ncst;
+static char *rettype;		/* type of %retval, NULL if none */
+static char *restype;		/* result type, NULL if none */
+static int fkind;		/* FUNCFUNC or LLVMFUNC: the current function */
+
+static char *nodeval(Node);
+
+static char *unsupported(Node p) {
+	error("mlir back end: unsupported operator `%s'\n", opname(p->op));
+	return "%unsupported";
+}
+
+static struct block *blockof(char *name) {
+	struct block *b;
+	unsigned h;
+
+	name = string(name);
+	h = ((unsigned long)name>>3)&(NELEMS(bhash)-1);
+	for (b = bhash[h]; b; b = b->hlink)
+		if (b->name == name)
+			return b;
+	NEW0(b, FUNC);
+	b->name = name;
+	b->hlink = bhash[h];
+	bhash[h] = b;
+	return b;
+}
+
+/* startblock - start block name */
+static void startblock(char *name) {
+	cur = blockof(name);
+	assert(!cur->defined);
+	cur->defined = 1;
+	cur->start = ftell(body);
+	*bdtail = cur;
+	bdtail = &cur->dlink;
+	fprint(body, "^%s:\n", cur->name);
+	terminated = 0;
+}
+
+/* inst - emit an operation of the body, in a new block after a
+   terminator */
+static void inst(const char *fmt, ...) {
+	va_list ap;
+
+	if (terminated)
+		startblock(stringf("b%d", ++nblock));
+	fprint(body, "  ");
+	va_start(ap, fmt);
+	vfprint(body, NULL, fmt, ap);
+	va_end(ap);
+	fprint(body, "\n");
+}
+
+/* pinst - emit an operation of the prologue */
+static void pinst(const char *fmt, ...) {
+	va_list ap;
+
+	fprint(prologue, "  ");
+	va_start(ap, fmt);
+	vfprint(prologue, NULL, fmt, ap);
+	va_end(ap);
+	fprint(prologue, "\n");
+}
+
+/* br - end the current block with a jump to block name */
+static void br(char *name) {
+	struct succ *s;
+
+	inst("cf.br ^%s", name);
+	NEW(s, FUNC);
+	s->b = blockof(name);
+	s->link = cur->succs;
+	cur->succs = s;
+	terminated = 1;
+}
+
+/* reach - mark the blocks that the entry block reaches */
+static void reach(void) {
+	struct block *b, *work = bfirst;
+	struct succ *s;
+
+	bfirst->reached = 1;
+	bfirst->wlink = NULL;
+	while ((b = work) != NULL) {
+		work = b->wlink;
+		for (s = b->succs; s; s = s->link)
+			if (!s->b->reached) {
+				s->b->reached = 1;
+				s->b->wlink = work;
+				work = s->b;
+			}
+	}
+}
+
+/* copytext - copy bytes from up to to of f to the module */
+static void copytext(FILE *f, long from, long to) {
+	char buf[BUFSIZE];
+	size_t n;
+
+	fseek(f, from, SEEK_SET);
+	for ( ; from < to; from += n) {
+		n = to - from < (long)sizeof buf ? to - from : sizeof buf;
+		n = fread(buf, 1, n, f);
+		assert(n > 0);
+		fwrite(buf, 1, n, module);
+	}
+}
+
+/* flushfunc - copy the pool, the prologue and the reached blocks of
+   the body to the module */
+static void flushfunc(void) {
+	struct block *b;
+	long end = ftell(body);
+
+	copytext(pool, 0, ftell(pool));
+	copytext(prologue, 0, ftell(prologue));
+	reach();
+	for (b = bfirst; b; b = b->dlink)
+		if (b->reached)
+			copytext(body, b->start, b->dlink ? b->dlink->start : end);
+}
+
+static char *newreg(void) {
+	return stringf("%%t%d", ++nreg);
+}
+
+static char *lookupval(Node p) {
+	struct nodeval *e;
+
+	for (e = nodevals[((unsigned long)p>>4)&(NELEMS(nodevals)-1)]; e; e = e->link)
+		if (e->node == p)
+			return e->val;
+	return NULL;
+}
+
+static void setval(Node p, char *val) {
+	struct nodeval *e;
+	unsigned h = ((unsigned long)p>>4)&(NELEMS(nodevals)-1);
+
+	NEW(e, FUNC);
+	e->node = p;
+	e->val = val;
+	e->link = nodevals[h];
+	nodevals[h] = e;
+}
+
+/* pooled - the name of the pool value with key, or NULL; the key is
+   interned */
+static char *pooled(char *key) {
+	struct pooled *e;
+
+	for (e = poolhash[((unsigned long)key>>3)&(NELEMS(poolhash)-1)]; e; e = e->link)
+		if (e->key == key)
+			return e->name;
+	return NULL;
+}
+
+/* topool - name the pool value with key, and emit op, which makes it */
+static char *topool(char *key, char *name, char *op) {
+	struct pooled *e;
+	unsigned h = ((unsigned long)key>>3)&(NELEMS(poolhash)-1);
+
+	NEW(e, FUNC);
+	e->key = key;
+	e->name = name;
+	e->link = poolhash[h];
+	poolhash[h] = e;
+	fprint(pool, "  %s = %s\n", name, op);
+	return name;
+}
+
+/* iconst - integer constant n of MLIR type ty, as %c<n>_<ty> */
+static char *iconst(long n, char *ty) {
+	char *v = string(stringf("%%c%D_%s", n, ty));
+
+	if (pooled(v))
+		return v;
+	return topool(v, v, stringf("arith.constant %D : %s", n, ty));
+}
+
+/* fltconst - floating constant d of size bytes */
+static char *fltconst(long double d, int size) {
+	char *ty = flttypestr(size), *lit = fltstr(d, size);
+	char *k = string(stringf("%s : %s", lit, ty)), *v = pooled(k);
+
+	if (v)
+		return v;
+	return topool(k, stringf("%%cst%d", ++ncst),
+		stringf("arith.constant %s : %s", lit, ty));
+}
+
+/* ptrconst - pointer constant p */
+static char *ptrconst(void *p) {
+	char *c, *v;
+
+	if (p == NULL) {
+		v = string("%null");
+		return pooled(v) ? v
+			: topool(v, v, "llvm.mlir.zero : !llvm.ptr");
+	}
+	c = iconst((long)p, "i64");
+	v = string(stringf("%%ptr%D", (long)p));
+	return pooled(v) ? v
+		: topool(v, v, stringf("llvm.inttoptr %s : i64 to !llvm.ptr", c));
+}
+
+/* gaddrval - the address of global variable p plus n, as %<p>.addr or
+   %<p>.addr.<n> */
+static char *gaddrval(Symbol p, long n) {
+	char *base = string(stringf("%%%s.addr", gname(p))), *v, *c;
+
+	if (!pooled(base))
+		topool(base, base, stringf("llvm.mlir.addressof @\"%s\" : !llvm.ptr",
+			gname(p)));
+	if (n == 0)
+		return base;
+	v = string(stringf("%s.%D", base, n));
+	if (pooled(v))
+		return v;
+	/* static indices are i32, and their minimum means a dynamic one */
+	if (n < -2147483647L || n > 2147483647L) {
+		c = iconst(n, "i64");
+		return topool(v, v, stringf("llvm.getelementptr %s[%s] : (!llvm.ptr, i64) -> !llvm.ptr, i8",
+			base, c));
+	}
+	return topool(v, v, stringf("llvm.getelementptr %s[%D] : (!llvm.ptr) -> !llvm.ptr, i8",
+		base, n));
+}
+
+/* optypestr - MLIR type of operator op */
+static char *optypestr(int op) {
+	switch (optype(op)) {
+	case I: case U: return stringf("i%d", 8*opsize(op));
+	case F: return flttypestr(opsize(op));
+	case P: return "!llvm.ptr";
+	}
+	assert(0);
+	return NULL;
+}
+
+/* cnstval - constant v of operator op's type and size */
+static char *cnstval(int op, Value v) {
+	switch (optype(op)) {
+	case I: return iconst(sext(v.i, opsize(op)), optypestr(op));
+	case U: return iconst(sext(v.u, opsize(op)), optypestr(op));
+	case P: return ptrconst(v.p);
+	case F: return fltconst(v.d, opsize(op));
+	}
+	assert(0);
+	return NULL;
+}
+
+/* opnd - the value of node k as an operand of op: an integer constant
+   of another size is made again in op's type */
+static char *opnd(Node k, int op) {
+	if (generic(k->op) == CNST && (optype(k->op) == I || optype(k->op) == U)
+	&& (optype(op) == I || optype(op) == U) && opsize(k->op) != opsize(op))
+		return iconst(sext(k->syms[0]->u.c.v.u, opsize(k->op)),
+			optypestr(op));
+	return nodeval(k);
+}
+
+static char *localname(Symbol p) {
+	if (*p->name >= '0' && *p->name <= '9')
+		return stringf("%%T%s.%d", p->name, ++nlocal);
+	return stringf("%%%s.%d", p->name, ++nlocal);
+}
+
+static void emitalloca(Symbol p) {
+	pinst("%s = llvm.alloca %s x %s {alignment = %d : i64} : (i32) -> !llvm.ptr",
+		p->x.name, iconst(1, "i32"), typestr(p->type), p->type->align);
+}
+
+static struct fninfo *fninfo(Symbol p) {
+	struct fninfo *f;
+	unsigned h = ((unsigned long)p>>3)&(NELEMS(fninfos)-1);
+
+	for (f = fninfos[h]; f; f = f->link)
+		if (f->p == p)
+			return f;
+	NEW0(f, PERM);
+	f->p = p;
+	f->link = fninfos[h];
+	fninfos[h] = f;
+	return f;
+}
+
+/* restypestr - result type of function type fty, NULL if none: a char
+   or short result has its own type, which callers extend */
+static char *restypestr(Type fty) {
+	Type rty = unqual(freturn(fty));
+
+	return rty->op == VOID ? NULL : typestr(rty);
+}
+
+/* rettypestr - type of %retval: char and short results are promoted */
+static char *rettypestr(Type fty) {
+	Type rty = unqual(freturn(fty));
+
+	if (rty->op == VOID)
+		return NULL;
+	if (isint(rty) || isenum(rty))
+		rty = promote(rty);
+	return typestr(rty);
+}
+
+static char *nodeval(Node p) {
+	char *v = lookupval(p), *a;
+	struct gaddr *g;
+	Symbol q;
+
+	if (v)
+		return v;
+	switch (generic(p->op)) {
+	case CNST:
+		v = cnstval(p->op, p->syms[0]->u.c.v);
+		break;
+	case ADDRG:
+		q = p->syms[0];
+		if ((g = gaddr(q)) != NULL)
+			v = isfunc(g->p->type) ? NULL : gaddrval(g->p, g->n);
+		else
+			v = isfunc(q->type) ? NULL : gaddrval(q, 0);
+		if (v == NULL)
+			return unsupported(p);
+		break;
+	case ADDRF: case ADDRL:
+		v = gname(p->syms[0]);
+		break;
+	case INDIR:
+		if (optype(p->op) == B)
+			return unsupported(p);
+		a = nodeval(p->kids[0]);
+		v = newreg();
+		inst("%s = llvm.load %s%s : !llvm.ptr -> %s", v,
+			p->volatil ? "volatile " : "", a, optypestr(p->op));
+		break;
+	default:
+		return unsupported(p);
+	}
+	setval(p, v);
+	return v;
+}
+
+static void emitnode(Node p) {
+	char *a, *v;
+
+	switch (generic(p->op)) {
+	case LABEL:
+		if (!terminated)
+			br(gname(p->syms[0]));
+		startblock(gname(p->syms[0]));
+		break;
+	case JUMP:
+		if (specific(p->kids[0]->op) != ADDRG+P) {
+			unsupported(p);
+			break;
+		}
+		br(gname(p->kids[0]->syms[0]));
+		break;
+	case ASGN:
+		if (optype(p->op) == B) {
+			unsupported(p);
+			break;
+		}
+		a = nodeval(p->kids[0]);
+		v = opnd(p->kids[1], p->op);
+		inst("llvm.store %s%s, %s : %s, !llvm.ptr", p->volatil ? "volatile " : "",
+			v, a, optypestr(p->op));
+		break;
+	case RET:
+		if (optype(p->op) != V)
+			inst("llvm.store %s, %%retval : %s, !llvm.ptr",
+				opnd(p->kids[0], p->op), optypestr(p->op));
+		break;
+	case INDIR:
+		(void)nodeval(p);
+		break;
+	default:
+		unsupported(p);
+	}
+}
 /* address - initialize q for addressing expression p+n: for a global p,
    q stands for the variable or function that p is or stands for plus
-   an offset */
+   an offset; for a local p, q is a value that the prologue computes
+   after gencode, when every local has its alloca */
 static void I(address)(Symbol q, Symbol p, long n) {
 	struct gaddr *a;
+	struct laddr *l;
 	unsigned h;
 
 	if (p->scope != GLOBAL && p->sclass != STATIC && p->sclass != EXTERN) {
-		error("mlir back end: unsupported address of local `%s' plus a constant\n",
-			p->name);
+		NEW(l, FUNC);
+		l->q = q;
+		l->p = p;
+		l->n = n;
+		l->link = NULL;
+		*ladtail = l;
+		ladtail = &l->link;
+		q->x.name = stringf("%%la%d", ++nlocal);
 		return;
 	}
 	if ((a = gaddr(p)) != NULL) {
@@ -588,15 +1039,130 @@ static void I(defsymbol)(Symbol p) {
 	/* parameters and locals are named by function and local */
 }
 
-static void I(emit)(Node p) {}
+static void I(emit)(Node p) {
+	for ( ; p; p = p->link)
+		emitnode(p);
+}
 static void I(export)(Symbol p) {}
 
-/* function - generate code for a function */
+/*
+ * function - generate code for function f: a func.func, or an llvm.func
+ * if it is variadic or -llvmfunc is given.  Its parameters have the
+ * types of caller[]: the front end promotes the integer parameters of
+ * prototyped definitions.
+ */
 static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
-	error("mlir back end: unsupported function definition `%s'\n", f->name);
+	int i;
+	struct fninfo *fi;
+	struct laddr *a;
+	char *v, *w;
+
+	flushglobal();
+	for (i = 0; caller[i]; i++)
+		if (isstruct(caller[i]->type))
+			break;
+	if (isstruct(freturn(f->type)) || caller[i]) {
+		error("mlir back end: unsupported structure %s of `%s'\n",
+			caller[i] ? "parameter" : "result", f->name);
+		return;
+	}
+	fi = fninfo(f);
+	assert(fi->kind == UNDECIDED);
+	fi->kind = fkind = variadic(f->type) || llvmfunc ? LLVMFUNC : FUNCFUNC;
+	rettype = rettypestr(f->type);
+	restype = restypestr(f->type);
+	memset(nodevals, 0, sizeof nodevals);
+	memset(poolhash, 0, sizeof poolhash);
+	memset(bhash, 0, sizeof bhash);
+	laddrs = NULL;
+	ladtail = &laddrs;
+	nreg = nblock = ncst = 0;
+	rewind(pool);
+	rewind(prologue);
+	rewind(body);
+	NEW0(bfirst, FUNC);
+	bfirst->defined = 1;
+	bfirst->start = 0;
+	bdtail = &bfirst->dlink;
+	cur = bfirst;
+	terminated = 0;
+
+	fprint(module, "%s ", fkind == FUNCFUNC ? "func.func" : "llvm.func");
+	if (fkind == LLVMFUNC && f->sclass == STATIC)
+		fprint(module, "internal ");
+	fprint(module, "@\"%s\"(", gname(f));
+	for (i = 0; caller[i]; i++)
+		fprint(module, "%s%%a%d: %s", i ? ", " : "", i, typestr(caller[i]->type));
+	if (variadic(f->type))
+		fprint(module, "%s...", i ? ", " : "");
+	fprint(module, ")");
+	if (restype)
+		fprint(module, " -> %s", restype);
+	if (fkind == FUNCFUNC && f->sclass == STATIC)
+		fprint(module, " attributes {llvm.linkage = #llvm.linkage<internal>}");
+	fprint(module, " {\n");
+
+	if (rettype)
+		pinst("%%retval = llvm.alloca %s x %s : (i32) -> !llvm.ptr",
+			iconst(1, "i32"), rettype);
+	for (i = 0; caller[i]; i++) {
+		Symbol p = caller[i], q = callee[i];
+		p->x.name = localname(p);
+		emitalloca(p);
+		pinst("llvm.store %%a%d, %s : %s, !llvm.ptr", i, p->x.name,
+			typestr(p->type));
+		if (q->sclass == p->sclass && q->type == p->type)
+			q->x.name = p->x.name;
+		else {	/* the front end assigns caller to callee */
+			q->x.name = localname(q);
+			emitalloca(q);
+		}
+	}
+	gencode(caller, callee);
+	for (a = laddrs; a; a = a->link)
+		pinst("%s = llvm.getelementptr %s[%D] : (!llvm.ptr) -> !llvm.ptr, i8",
+			a->q->x.name, gname(a->p), a->n);
+	emitcode();
+	v = fkind == FUNCFUNC ? "func.return" : "llvm.return";
+	if (rettype == NULL)
+		inst("%s", v);
+	else {
+		w = newreg();
+		inst("%s = llvm.load %%retval : !llvm.ptr -> %s", w, rettype);
+		if (strcmp(rettype, restype) != 0) {
+			char *t = newreg();
+			inst("%s = arith.trunci %s : %s to %s", t, w, rettype, restype);
+			w = t;
+		}
+		inst("%s %s : %s", v, w, restype);
+	}
+	flushfunc();
+	fprint(module, "}\n");
 }
 
-static Node I(gen)(Node p) { return p; }
+/* gen - check the dags on list p; emit does the work */
+static Node I(gen)(Node p) {
+	Node q;
+
+	for (q = p; q; q = q->link) {
+		switch (generic(q->op)) {	/* check for valid forest */
+		case CALL:
+			break;
+		case ARG:
+		case ASGN: case JUMP: case LABEL: case RET:
+		case EQ: case GE: case GT: case LE: case LT: case NE:
+			assert(q->count == 0);
+			break;
+		case INDIR:
+			assert(q->count > 0);
+			break;
+		default:
+			assert(0);
+		}
+		check(q);
+	}
+	return p;
+}
 
 /* global - announce a global */
 static void I(global)(Symbol p) {
@@ -619,7 +1185,8 @@ static void I(import)(Symbol p) {
 
 /* local - local variable */
 static void I(local)(Symbol p) {
-	error("mlir back end: unsupported local `%s'\n", p->name);
+	p->x.name = localname(p);
+	emitalloca(p);
 }
 
 /* progbeg - beginning of program */
@@ -629,7 +1196,8 @@ static void I(progbeg)(int argc, char *argv[]) {
 	for (i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-llvmfunc") == 0)
 			llvmfunc = 1;
-	if ((module = tmpfile()) == NULL) {
+	if ((module = tmpfile()) == NULL || (pool = tmpfile()) == NULL
+	|| (prologue = tmpfile()) == NULL || (body = tmpfile()) == NULL) {
 		fprint(stderr, "%s: can't create a temporary file\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
