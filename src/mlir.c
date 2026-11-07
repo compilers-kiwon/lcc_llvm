@@ -559,9 +559,19 @@ enum { UNDECIDED, FUNCFUNC, LLVMFUNC };
 struct fninfo {
 	Symbol p;
 	int kind;
+	char *params;		/* FUNCFUNC: types of the parameters ... */
+	char *result;		/* ... and of the result, NULL if none */
+	char *type;		/* ... as a function type */
 	struct fninfo *link;
 };
 static struct fninfo *fninfos[256];
+
+/* arguments listed since the last call; they all belong to the next CALL */
+struct arg {
+	char *type, *val;
+	struct arg *link;
+};
+static struct arg *args, **argtail = &args;
 
 static int nreg, nblock, nlocal, ncst;
 static char *rettype;		/* type of %retval, NULL if none */
@@ -569,6 +579,27 @@ static char *restype;		/* result type, NULL if none */
 static int fkind;		/* FUNCFUNC or LLVMFUNC: the current function */
 
 static char *nodeval(Node);
+
+/* cat - the concatenation of the strings up to a NULL, of any length */
+static char *cat(const char *s, ...) {
+	va_list ap;
+	const char *t;
+	char *r, *q;
+	int n = 0;
+
+	va_start(ap, s);
+	for (t = s; t; t = va_arg(ap, const char *))
+		n += strlen(t);
+	va_end(ap);
+	q = r = allocate(n + 1, PERM);
+	va_start(ap, s);
+	for (t = s; t; t = va_arg(ap, const char *)) {
+		strcpy(q, t);
+		q += strlen(t);
+	}
+	va_end(ap);
+	return r;
+}
 
 static char *unsupported(Node p) {
 	error("mlir back end: unsupported operator `%s'\n", opname(p->op));
@@ -979,6 +1010,105 @@ static char *ptrarith(Node p) {
 	return v;
 }
 
+/* fntypestr - the function type with parameters params and result res */
+static char *fntypestr(char *params, char *res) {
+	return cat("(", params, ") -> ", res ? res : "()", NULL);
+}
+
+/* hasstruct - does function type fty have a structure parameter or
+   result? */
+static int hasstruct(Type fty) {
+	Type *proto = fty->u.f.proto;
+	int i;
+
+	if (isstruct(freturn(fty)))
+		return 1;
+	for (i = 0; proto && proto[i]; i++)
+		if (isstruct(proto[i]))
+			return 1;
+	return 0;
+}
+
+/*
+ * fnref - the kind of function p, decided here if this is its first
+ * use: a func.func of type T if its type has a prototype and is not
+ * variadic, else an llvm.func.  T has the promoted types of the
+ * integer parameters, as the definition has.
+ */
+static int fnref(Symbol p) {
+	struct fninfo *f = fninfo(p);
+	Type fty = p->type, *proto = fty->u.f.proto, ty;
+	int i;
+
+	if (f->kind != UNDECIDED)
+		return f->kind;
+	if (llvmfunc || proto == NULL || fty->u.f.oldstyle || variadic(fty)) {
+		f->kind = LLVMFUNC;
+		return f->kind;
+	}
+	assert(!hasstruct(fty));
+	f->kind = FUNCFUNC;
+	f->params = "";
+	for (i = 0; proto[i] && proto[i] != voidtype; i++) {
+		ty = proto[i];
+		if (isint(ty) || isenum(ty))
+			ty = promote(ty);
+		f->params = cat(f->params, i ? ", " : "", typestr(ty), NULL);
+	}
+	f->result = restypestr(fty);
+	f->type = fntypestr(f->params, f->result);
+	return f->kind;
+}
+
+/*
+ * emitcall - emit call p, return its value: a func.call if it is a
+ * direct call of a func.func whose type matches the call's.  A char or
+ * short result is extended: its upper bits are undefined.
+ */
+static char *emitcall(Node p) {
+	Type fty = p->syms[0]->type, rty = freturn(fty);
+	Node k = p->kids[0];
+	Symbol f = k->syms[0];
+	struct arg *a;
+	char *rt = optype(p->op) == V ? NULL : optypestr(p->op);
+	char *plain = "", *operands = "", *v, *w;
+	int narrow = 0;
+
+	if (isstruct(rty) || specific(k->op) != ADDRG+P || !isfunc(f->type)
+	|| gaddr(f) || fty->u.f.proto == NULL || fty->u.f.oldstyle
+	|| variadic(fty) || strncmp(f->name, "__builtin_va_", 13) == 0) {
+		args = NULL;
+		argtail = &args;
+		return unsupported(p);
+	}
+	if (rt && (isint(rty) || isenum(rty)) && rty->size < opsize(p->op)) {
+		rt = typestr(rty);
+		narrow = 1;
+	}
+	for (a = args; a; a = a->link) {
+		plain = cat(plain, a != args ? ", " : "", a->type, NULL);
+		operands = cat(operands, a != args ? ", " : "", a->val, NULL);
+	}
+	args = NULL;
+	argtail = &args;
+	if (fnref(f) != FUNCFUNC || strcmp(fninfo(f)->type, fntypestr(plain, rt)) != 0)
+		return unsupported(p);
+	if (rt == NULL) {
+		inst("func.call @\"%s\"(%s) : (%s) -> ()", gname(f), operands, plain);
+		return "";
+	}
+	v = newreg();
+	inst("%s = func.call @\"%s\"(%s) : (%s) -> %s", v, gname(f), operands,
+		plain, rt);
+	if (narrow) {
+		w = newreg();
+		inst("%s = arith.%s %s : %s to %s", w, isunsigned(rty) ? "extui" : "extsi",
+			v, rt, optypestr(p->op));
+		v = w;
+	}
+	return v;
+}
+
 static char *nodeval(Node p) {
 	char *v = lookupval(p), *a, *b;
 	int from;
@@ -1054,6 +1184,9 @@ static char *nodeval(Node p) {
 				optypestr(p->kids[0]->op), optypestr(p->op));
 		}
 		break;
+	case CALL:
+		v = emitcall(p);
+		break;
 	case NEG:
 		if (optype(p->op) != I)
 			return unsupported(p);
@@ -1093,6 +1226,7 @@ static char *cmppred(int op) {
 
 static void emitnode(Node p) {
 	char *a, *b, *c, *v, *fall;
+	struct arg *arg;
 
 	switch (generic(p->op)) {
 	case EQ: case NE: case LT: case LE: case GT: case GE:
@@ -1138,7 +1272,19 @@ static void emitnode(Node p) {
 			inst("llvm.store %s, %%retval : %s, !llvm.ptr",
 				opnd(p->kids[0], p->op), optypestr(p->op));
 		break;
-	case INDIR:
+	case ARG:
+		if (optype(p->op) == B) {
+			unsupported(p);
+			break;
+		}
+		NEW(arg, FUNC);
+		arg->type = optypestr(p->op);
+		arg->val = opnd(p->kids[0], p->op);
+		arg->link = NULL;
+		*argtail = arg;
+		argtail = &arg->link;
+		break;
+	case CALL: case INDIR:
 		(void)nodeval(p);
 		break;
 	default:
@@ -1254,7 +1400,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	int i;
 	struct fninfo *fi;
 	struct laddr *a;
-	char *v, *w;
+	char *v, *w, *params;
 
 	flushglobal();
 	for (i = 0; caller[i]; i++)
@@ -1265,16 +1411,31 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			caller[i] ? "parameter" : "result", f->name);
 		return;
 	}
-	fi = fninfo(f);
-	assert(fi->kind == UNDECIDED);
-	fi->kind = fkind = variadic(f->type) || llvmfunc ? LLVMFUNC : FUNCFUNC;
 	rettype = rettypestr(f->type);
 	restype = restypestr(f->type);
+	params = "";
+	for (i = 0; caller[i]; i++)
+		params = cat(params, i ? ", " : "", typestr(caller[i]->type), NULL);
+	fi = fninfo(f);
+	if (fi->kind == UNDECIDED) {
+		fi->kind = variadic(f->type) || llvmfunc ? LLVMFUNC : FUNCFUNC;
+		fi->params = params;
+		fi->result = restype;
+		fi->type = fntypestr(params, restype);
+	} else if (fi->kind == FUNCFUNC
+	&& strcmp(fi->type, fntypestr(params, restype)) != 0) {
+		error("mlir back end: `%s' is defined as %s but was used as %s\n",
+			f->name, fntypestr(params, restype), fi->type);
+		return;
+	}
+	fkind = fi->kind;
 	memset(nodevals, 0, sizeof nodevals);
 	memset(poolhash, 0, sizeof poolhash);
 	memset(bhash, 0, sizeof bhash);
 	laddrs = NULL;
 	ladtail = &laddrs;
+	args = NULL;
+	argtail = &args;
 	nreg = nblock = ncst = 0;
 	rewind(pool);
 	rewind(prologue);
@@ -1371,12 +1532,25 @@ static void I(global)(Symbol p) {
 	itail = &items;
 }
 
-/* import - declare an external variable, which may have an incomplete
-   type and so no alignment yet; functions need no declarations while
-   nothing can call them */
+/* import - declare an external symbol: a variable, which may have an
+   incomplete type and so no alignment yet, or a function that is a
+   func.func; the stdarg builtins are not functions */
 static void I(import)(Symbol p) {
-	if (isfunc(p->type))
+	struct fninfo *f;
+
+	if (isfunc(p->type)) {
+		if (strncmp(p->name, "__builtin_va_", 13) == 0 || hasstruct(p->type)
+		|| fnref(p) != FUNCFUNC)
+			return;
+		f = fninfo(p);
+		fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->params);
+		if (f->result)
+			fprint(module, " -> %s", f->result);
+		if (sysv_returnstwice(p->name))
+			fprint(module, " attributes {passthrough = [\"returns_twice\"]}");
+		fprint(module, "\n");
 		return;
+	}
 	fprint(module, "llvm.mlir.global external @\"%s\"() {alignment = %d : i64} : %s\n",
 		gname(p), p->type->align > 0 ? p->type->align : 1,
 		typestr(p->type));
