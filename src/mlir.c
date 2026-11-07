@@ -356,11 +356,23 @@ static struct part *group(struct part *p, int n) {
 	return p;
 }
 
-/* addrval - emit the address of variable p plus n, return its value */
-static char *addrval(Symbol p, long n) {
-	char *v = newval(), *c, *w;
+static char *functype(Symbol);
 
-	ginst("%s = llvm.mlir.addressof @\"%s\" : !llvm.ptr", v, gname(p));
+/* addrval - emit the address of variable or function p plus n, return
+   its value */
+static char *addrval(Symbol p, long n) {
+	char *v, *c, *w, *t;
+
+	if (isfunc(p->type) && (t = functype(p)) != NULL) {
+		c = newval();
+		ginst("%s = func.constant @\"%s\" : %s", c, gname(p), t);
+		v = newval();
+		ginst("%s = builtin.unrealized_conversion_cast %s : %s to !llvm.ptr",
+			v, c, t);
+	} else {
+		v = newval();
+		ginst("%s = llvm.mlir.addressof @\"%s\" : !llvm.ptr", v, gname(p));
+	}
 	if (n == 0)
 		return v;
 	/* static indices are i32, and their minimum means a dynamic one */
@@ -815,12 +827,20 @@ static char *ptrconst(void *p) {
 		: topool(v, v, stringf("llvm.inttoptr %s : i64 to !llvm.ptr", c));
 }
 
-/* gaddrval - the address of global variable p plus n, as %<p>.addr or
-   %<p>.addr.<n> */
+/* gaddrval - the address of global variable or function p plus n, as
+   %<p>.addr or %<p>.addr.<n>; the address of a func.func is made from
+   %<p>.fn, a value of its function type */
 static char *gaddrval(Symbol p, long n) {
-	char *base = string(stringf("%%%s.addr", gname(p))), *v, *c;
+	char *base = string(stringf("%%%s.addr", gname(p))), *v, *c, *t;
 
-	if (!pooled(base))
+	if (pooled(base))
+		;
+	else if (isfunc(p->type) && (t = functype(p)) != NULL) {
+		c = string(stringf("%%%s.fn", gname(p)));
+		topool(c, c, stringf("func.constant @\"%s\" : %s", gname(p), t));
+		topool(base, base, stringf("builtin.unrealized_conversion_cast %s : %s to !llvm.ptr",
+			c, t));
+	} else
 		topool(base, base, stringf("llvm.mlir.addressof @\"%s\" : !llvm.ptr",
 			gname(p)));
 	if (n == 0)
@@ -1010,6 +1030,12 @@ static char *ptrarith(Node p) {
 	return v;
 }
 
+/* argtypestr - type of a parameter of type ty in a prototype: integers
+   are promoted, as in definitions */
+static char *argtypestr(Type ty) {
+	return typestr(isint(ty) || isenum(ty) ? promote(ty) : ty);
+}
+
 /* fntypestr - the function type with parameters params and result res */
 static char *fntypestr(char *params, char *res) {
 	return cat("(", params, ") -> ", res ? res : "()", NULL);
@@ -1037,7 +1063,7 @@ static int hasstruct(Type fty) {
  */
 static int fnref(Symbol p) {
 	struct fninfo *f = fninfo(p);
-	Type fty = p->type, *proto = fty->u.f.proto, ty;
+	Type fty = p->type, *proto = fty->u.f.proto;
 	int i;
 
 	if (f->kind != UNDECIDED)
@@ -1046,60 +1072,79 @@ static int fnref(Symbol p) {
 		f->kind = LLVMFUNC;
 		return f->kind;
 	}
-	assert(!hasstruct(fty));
+	assert(!hasstruct(fty));	/* see the callers */
 	f->kind = FUNCFUNC;
 	f->params = "";
-	for (i = 0; proto[i] && proto[i] != voidtype; i++) {
-		ty = proto[i];
-		if (isint(ty) || isenum(ty))
-			ty = promote(ty);
-		f->params = cat(f->params, i ? ", " : "", typestr(ty), NULL);
-	}
+	for (i = 0; proto[i] && proto[i] != voidtype; i++)
+		f->params = cat(f->params, i ? ", " : "", argtypestr(proto[i]), NULL);
 	f->result = restypestr(fty);
 	f->type = fntypestr(f->params, f->result);
 	return f->kind;
 }
 
+/* functype - the type of function p if it is a func.func, else NULL */
+static char *functype(Symbol p) {
+	return fnref(p) == FUNCFUNC ? fninfo(p)->type : NULL;
+}
+
+/* fnaddrok - can the address of function p be taken?  Not yet if it
+   has structure parameters or results */
+static int fnaddrok(Symbol p) {
+	return !isfunc(p->type) || !hasstruct(p->type);
+}
+
 /*
  * emitcall - emit call p, return its value: a func.call if it is a
- * direct call of a func.func whose type matches the call's.  A char or
- * short result is extended: its upper bits are undefined.
+ * direct call of a func.func whose type matches the call's, else an
+ * llvm.call through a pointer, vararg if the call's type has no
+ * prototype or is variadic.  A char or short result is extended: its
+ * upper bits are undefined.
  */
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
 	Node k = p->kids[0];
-	Symbol f = k->syms[0];
+	Symbol f = specific(k->op) == ADDRG+P ? k->syms[0] : NULL;
 	struct arg *a;
 	char *rt = optype(p->op) == V ? NULL : optypestr(p->op);
-	char *plain = "", *operands = "", *v, *w;
-	int narrow = 0;
+	char *plain = "", *fixed = "", *operands = "", *v = NULL, *w;
+	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
 
-	if (isstruct(rty) || specific(k->op) != ADDRG+P || !isfunc(f->type)
-	|| gaddr(f) || fty->u.f.proto == NULL || fty->u.f.oldstyle
-	|| variadic(fty) || strncmp(f->name, "__builtin_va_", 13) == 0) {
+	if (isstruct(rty) || f && (strncmp(f->name, "__builtin_va_", 13) == 0
+	|| isfunc(f->type) && hasstruct(f->type))) {
 		args = NULL;
 		argtail = &args;
 		return unsupported(p);
 	}
+	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
+		nfixed = 0;
+	else if (variadic(fty))
+		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
+			;	/* proto ends with voidtype for ... */
 	if (rt && (isint(rty) || isenum(rty)) && rty->size < opsize(p->op)) {
 		rt = typestr(rty);
 		narrow = 1;
 	}
-	for (a = args; a; a = a->link) {
-		plain = cat(plain, a != args ? ", " : "", a->type, NULL);
-		operands = cat(operands, a != args ? ", " : "", a->val, NULL);
+	for (i = 0, a = args; a; i++, a = a->link) {
+		plain = cat(plain, i ? ", " : "", a->type, NULL);
+		operands = cat(operands, i ? ", " : "", a->val, NULL);
+		if (nfixed < 0 || i < nfixed)
+			fixed = cat(fixed, i ? ", " : "", a->type, NULL);
 	}
 	args = NULL;
 	argtail = &args;
-	if (fnref(f) != FUNCFUNC || strcmp(fninfo(f)->type, fntypestr(plain, rt)) != 0)
-		return unsupported(p);
-	if (rt == NULL) {
-		inst("func.call @\"%s\"(%s) : (%s) -> ()", gname(f), operands, plain);
+	if (rt)
+		v = newreg();
+	if (f && isfunc(f->type) && gaddr(f) == NULL && nfixed < 0
+	&& fnref(f) == FUNCFUNC && strcmp(fninfo(f)->type, fntypestr(plain, rt)) == 0)
+		inst("%s%sfunc.call @\"%s\"(%s) : (%s) -> %s", v ? v : "", v ? " = " : "",
+			gname(f), operands, plain, rt ? rt : "()");
+	else
+		inst("%s", cat(v ? v : "", v ? " = " : "", "llvm.call ", nodeval(k),
+			"(", operands, ")", nfixed < 0 ? "" : cat(" vararg(!llvm.func<",
+			rt ? rt : "void", " (", fixed, *fixed ? ", " : "", "...)>)", NULL),
+			" : !llvm.ptr, (", plain, ") -> ", rt ? rt : "()", NULL));
+	if (v == NULL)
 		return "";
-	}
-	v = newreg();
-	inst("%s = func.call @\"%s\"(%s) : (%s) -> %s", v, gname(f), operands,
-		plain, rt);
 	if (narrow) {
 		w = newreg();
 		inst("%s = arith.%s %s : %s to %s", w, isunsigned(rty) ? "extui" : "extsi",
@@ -1124,9 +1169,9 @@ static char *nodeval(Node p) {
 	case ADDRG:
 		q = p->syms[0];
 		if ((g = gaddr(q)) != NULL)
-			v = isfunc(g->p->type) ? NULL : gaddrval(g->p, g->n);
+			v = fnaddrok(g->p) ? gaddrval(g->p, g->n) : NULL;
 		else
-			v = isfunc(q->type) ? NULL : gaddrval(q, 0);
+			v = fnaddrok(q) ? gaddrval(q, 0) : NULL;
 		if (v == NULL)
 			return unsupported(p);
 		break;
@@ -1337,7 +1382,7 @@ static void I(defaddress)(Symbol p) {
 		n = a->n;
 		p = a->p;
 	}
-	if (p->scope == LABELS || isfunc(p->type)) {
+	if (p->scope == LABELS || !fnaddrok(p)) {
 		error("mlir back end: unsupported address of %s `%s' in global data\n",
 			p->scope == LABELS ? "label" : "function", p->name);
 		return;
@@ -1533,19 +1578,36 @@ static void I(global)(Symbol p) {
 }
 
 /* import - declare an external symbol: a variable, which may have an
-   incomplete type and so no alignment yet, or a function that is a
-   func.func; the stdarg builtins are not functions */
+   incomplete type and so no alignment yet, or a function, without
+   parameters if it has no prototype; the stdarg builtins are not
+   functions */
 static void I(import)(Symbol p) {
 	struct fninfo *f;
+	Type *proto;
+	int i;
 
 	if (isfunc(p->type)) {
-		if (strncmp(p->name, "__builtin_va_", 13) == 0 || hasstruct(p->type)
-		|| fnref(p) != FUNCFUNC)
+		if (strncmp(p->name, "__builtin_va_", 13) == 0 || hasstruct(p->type))
 			return;
-		f = fninfo(p);
-		fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->params);
-		if (f->result)
-			fprint(module, " -> %s", f->result);
+		if (fnref(p) == FUNCFUNC) {
+			f = fninfo(p);
+			fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->params);
+			if (f->result)
+				fprint(module, " -> %s", f->result);
+		} else {
+			fprint(module, "llvm.func @\"%s\"(", gname(p));
+			proto = p->type->u.f.proto;
+			if (proto && !p->type->u.f.oldstyle) {
+				for (i = 0; proto[i] && proto[i] != voidtype; i++)
+					fprint(module, "%s%s", i ? ", " : "", argtypestr(proto[i]));
+				if (variadic(p->type))
+					fprint(module, ", ...");
+			} else
+				fprint(module, "...");
+			fprint(module, ")");
+			if (restypestr(p->type))
+				fprint(module, " -> %s", restypestr(p->type));
+		}
 		if (sysv_returnstwice(p->name))
 			fprint(module, " attributes {passthrough = [\"returns_twice\"]}");
 		fprint(module, "\n");
