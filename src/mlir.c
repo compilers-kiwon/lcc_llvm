@@ -920,8 +920,68 @@ static char *shiftcount(Node p) {
 	return v;
 }
 
+/* ptroffset - integer node k as an i64 byte offset, negated if neg; a
+   constant that fits a static index, which is an i32 whose minimum means
+   a dynamic one, goes in *c and NULL is returned */
+static char *ptroffset(Node k, int neg, long *c) {
+	char *v, *w;
+	long n;
+
+	if (generic(k->op) == CNST) {
+		if (optype(k->op) == U && opsize(k->op) < 8)
+			n = k->syms[0]->u.c.v.u&ones(8*opsize(k->op));
+		else
+			n = sext(k->syms[0]->u.c.v.u, opsize(k->op));
+		if (neg)
+			n = -n;
+		if (n >= -2147483647L && n <= 2147483647L) {
+			*c = n;
+			return NULL;
+		}
+		return iconst(n, "i64");
+	}
+	v = nodeval(k);
+	if (opsize(k->op) < 8) {
+		w = newreg();
+		inst("%s = arith.%s %s : %s to i64", w,
+			optype(k->op) == U ? "extui" : "extsi", v, optypestr(k->op));
+		v = w;
+	}
+	if (neg) {
+		w = newreg();
+		inst("%s = arith.subi %s, %s : i64", w, iconst(0, "i64"), v);
+		v = w;
+	}
+	return v;
+}
+
+/* ptrarith - emit pointer addition or subtraction p, whose pointer may
+   be either kid, as a getelementptr of bytes; return its value */
+static char *ptrarith(Node p) {
+	Node ptr = p->kids[0], k = p->kids[1];
+	char *a, *off, *v = newreg();
+	long c;
+
+	if (optype(ptr->op) != P) {
+		assert(generic(p->op) == ADD);
+		ptr = p->kids[1];
+		k = p->kids[0];
+	}
+	assert(optype(ptr->op) == P && optype(k->op) != P);
+	a = nodeval(ptr);
+	off = ptroffset(k, generic(p->op) == SUB, &c);
+	if (off == NULL)
+		inst("%s = llvm.getelementptr %s[%D] : (!llvm.ptr) -> !llvm.ptr, i8",
+			v, a, c);
+	else
+		inst("%s = llvm.getelementptr %s[%s] : (!llvm.ptr, i64) -> !llvm.ptr, i8",
+			v, a, off);
+	return v;
+}
+
 static char *nodeval(Node p) {
 	char *v = lookupval(p), *a, *b;
+	int from;
 	struct gaddr *g;
 	Symbol q;
 
@@ -951,7 +1011,13 @@ static char *nodeval(Node p) {
 		inst("%s = llvm.load %s%s : !llvm.ptr -> %s", v,
 			p->volatil ? "volatile " : "", a, optypestr(p->op));
 		break;
-	case ADD: case SUB: case MUL: case DIV: case MOD:
+	case ADD: case SUB:
+		if (optype(p->op) == P) {
+			v = ptrarith(p);
+			break;
+		}
+		/* fall through */
+	case MUL: case DIV: case MOD:
 	case BAND: case BOR: case BXOR:
 		if (optype(p->op) != I && optype(p->op) != U)
 			return unsupported(p);
@@ -967,6 +1033,26 @@ static char *nodeval(Node p) {
 		v = newreg();
 		inst("%s = arith.%s %s, %s : %s", v, intop(p->op), a, b,
 			optypestr(p->op));
+		break;
+	case CVI: case CVU: case CVP:
+		if (optype(p->op) == F)
+			return unsupported(p);
+		a = nodeval(p->kids[0]);
+		from = opsize(p->kids[0]->op);
+		assert(from == p->syms[0]->u.c.v.i);
+		if (generic(p->op) == CVP || optype(p->op) == P) {
+			v = newreg();
+			inst("%s = llvm.%s %s : %s to %s", v,
+				optype(p->op) == P ? "inttoptr" : "ptrtoint", a,
+				optypestr(p->kids[0]->op), optypestr(p->op));
+		} else if (from == opsize(p->op))
+			v = a;
+		else {
+			v = newreg();
+			inst("%s = arith.%s %s : %s to %s", v, from > opsize(p->op)
+				? "trunci" : generic(p->op) == CVI ? "extsi" : "extui", a,
+				optypestr(p->kids[0]->op), optypestr(p->op));
+		}
 		break;
 	case NEG:
 		if (optype(p->op) != I)
