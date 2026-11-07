@@ -7,6 +7,7 @@
 #define lay r_lay
 #define arith r_arith
 #define compare r_compare
+#define ldconst r_ldconst
 #define tolong r_tolong
 #define toulong r_toulong
 #define toint r_toint
@@ -31,6 +32,7 @@
 #undef lay
 #undef arith
 #undef compare
+#undef ldconst
 #undef tolong
 #undef toulong
 #undef toint
@@ -52,6 +54,7 @@
 #undef layout
 long double arith(int, long double, long double), passld(long double, double, long double, int, long double);
 int compare(long double, long double), fmt(char *, long double), layout(void);
+long double ldconst(int);
 long tolong(long double); unsigned long toulong(long double); int toint(long double); unsigned tounsigned(long double);
 short toshort(long double); signed char tochar(long double); double todouble(long double); float tofloat(long double);
 long double fromlong(long), fromulong(unsigned long), fromint(int), fromunsigned(unsigned), fromdouble(double), fromfloat(float);
@@ -78,6 +81,8 @@ int main(void) {
 	int op;
 	long double nan = 0.0L / 0.0L, inf = 1.0L / 0.0L;
 	CHK(layout(), r_layout(), "%d");
+	for (i = 0; i < NCONST; i++)
+		same("ldconst", ldconst(i), r_ldconst(i));
 	for (i = 0; i < NLD; i++) {
 		same("global", global(i), r_global(i));
 		CHK(tolong(ldv[i]), r_tolong(ldv[i]), "%ld"); CHK(toulong(ldv[i]), r_toulong(ldv[i]), "%lu");

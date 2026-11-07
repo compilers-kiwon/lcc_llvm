@@ -1192,10 +1192,19 @@ static char *nodeval(Node p) {
 			break;
 		}
 		/* fall through */
-	case MUL: case DIV: case MOD:
-	case BAND: case BOR: case BXOR:
-		if (optype(p->op) != I && optype(p->op) != U)
-			return unsupported(p);
+	case MUL: case DIV:
+		if (optype(p->op) == F) {
+			a = nodeval(p->kids[0]);
+			b = nodeval(p->kids[1]);
+			v = newreg();
+			inst("%s = arith.%s %s, %s : %s", v, generic(p->op) == ADD ? "addf"
+				: generic(p->op) == SUB ? "subf" : generic(p->op) == MUL ? "mulf"
+				: "divf", a, b, optypestr(p->op));
+			break;
+		}
+		/* fall through */
+	case MOD: case BAND: case BOR: case BXOR:
+		assert(optype(p->op) == I || optype(p->op) == U);
 		a = opnd(p->kids[0], p->op);
 		b = opnd(p->kids[1], p->op);
 		v = newreg();
@@ -1209,9 +1218,29 @@ static char *nodeval(Node p) {
 		inst("%s = arith.%s %s, %s : %s", v, intop(p->op), a, b,
 			optypestr(p->op));
 		break;
+	case CVF:
+		/* rounding attributes would make constrained intrinsics */
+		a = nodeval(p->kids[0]);
+		from = opsize(p->kids[0]->op);
+		assert(from == p->syms[0]->u.c.v.i);
+		if (optype(p->op) == F && from == opsize(p->op))
+			v = a;
+		else {
+			v = newreg();
+			inst("%s = arith.%s %s : %s to %s", v, optype(p->op) == I ? "fptosi"
+				: from < opsize(p->op) ? "extf" : "truncf", a,
+				optypestr(p->kids[0]->op), optypestr(p->op));
+		}
+		break;
 	case CVI: case CVU: case CVP:
-		if (optype(p->op) == F)
-			return unsupported(p);
+		if (optype(p->op) == F) {	/* unsigned goes by way of signed */
+			assert(generic(p->op) == CVI);
+			a = nodeval(p->kids[0]);
+			v = newreg();
+			inst("%s = arith.sitofp %s : %s to %s", v, a,
+				optypestr(p->kids[0]->op), optypestr(p->op));
+			break;
+		}
 		a = nodeval(p->kids[0]);
 		from = opsize(p->kids[0]->op);
 		assert(from == p->syms[0]->u.c.v.i);
@@ -1233,10 +1262,12 @@ static char *nodeval(Node p) {
 		v = emitcall(p);
 		break;
 	case NEG:
-		if (optype(p->op) != I)
-			return unsupported(p);
 		a = nodeval(p->kids[0]);
 		v = newreg();
+		if (optype(p->op) == F) {
+			inst("%s = arith.negf %s : %s", v, a, optypestr(p->op));
+			break;
+		}
 		inst("%s = arith.subi %s, %s : %s", v, iconst(0, optypestr(p->op)), a,
 			optypestr(p->op));
 		break;
@@ -1269,6 +1300,24 @@ static char *cmppred(int op) {
 	return NULL;
 }
 
+/* fcmppred - the predicate of floating comparison p: dag.c marks those
+   that it reversed to jump if false with syms[1], and they must be true
+   if unordered */
+static char *fcmppred(Node p) {
+	int u = p->syms[1] != NULL;
+
+	switch (generic(p->op)) {
+	case EQ: return "oeq";
+	case NE: return "une";
+	case LT: return u ? "ult" : "olt";
+	case LE: return u ? "ule" : "ole";
+	case GT: return u ? "ugt" : "ogt";
+	case GE: return u ? "uge" : "oge";
+	}
+	assert(0);
+	return NULL;
+}
+
 static void emitnode(Node p) {
 	char *a, *b, *c, *v, *fall;
 	struct arg *arg;
@@ -1276,17 +1325,17 @@ static void emitnode(Node p) {
 	switch (generic(p->op)) {
 	case EQ: case NE: case LT: case LE: case GT: case GE:
 		/* jump to syms[0] if true; else fall into a new block */
-		if (optype(p->op) != I && optype(p->op) != U) {
-			unsupported(p);
-			break;
-		}
 		/* pointers are compared as integers: the front end adds CVPU */
 		a = opnd(p->kids[0], p->op);
 		b = opnd(p->kids[1], p->op);
 		c = newreg();
 		fall = stringf("b%d", ++nblock);
-		inst("%s = arith.cmpi %s, %s, %s : %s", c, cmppred(p->op), a, b,
-			optypestr(p->op));
+		if (optype(p->op) == F)
+			inst("%s = arith.cmpf %s, %s, %s : %s", c, fcmppred(p), a, b,
+				optypestr(p->op));
+		else
+			inst("%s = arith.cmpi %s, %s, %s : %s", c, cmppred(p->op), a, b,
+				optypestr(p->op));
 		condbr(c, gname(p->syms[0]), fall);
 		startblock(fall);
 		break;
