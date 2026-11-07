@@ -801,6 +801,13 @@ static char *iconst(long n, char *ty) {
 	return topool(v, v, stringf("arith.constant %D : %s", n, ty));
 }
 
+/* boolconst - i1 constant b, as %true or %false */
+static char *boolconst(int b) {
+	char *v = string(b ? "%true" : "%false");
+
+	return pooled(v) ? v : topool(v, v, b ? "arith.constant true" : "arith.constant false");
+}
+
 /* fltconst - floating constant d of size bytes */
 static char *fltconst(long double d, int size) {
 	char *ty = flttypestr(size), *lit = fltstr(d, size);
@@ -1179,8 +1186,10 @@ static char *nodeval(Node p) {
 		v = gname(p->syms[0]);
 		break;
 	case INDIR:
-		if (optype(p->op) == B)
-			return unsupported(p);
+		if (optype(p->op) == B) {	/* a structure is its address */
+			v = nodeval(p->kids[0]);
+			break;
+		}
 		a = nodeval(p->kids[0]);
 		v = newreg();
 		inst("%s = llvm.load %s%s : !llvm.ptr -> %s", v,
@@ -1352,8 +1361,19 @@ static void emitnode(Node p) {
 		br(gname(p->kids[0]->syms[0]));
 		break;
 	case ASGN:
-		if (optype(p->op) == B) {
-			unsupported(p);
+		if (optype(p->op) == B) {	/* kids[1] is INDIRB */
+			/* llvm.intr.memcpy has no alignments */
+			int align = p->syms[1]->u.c.v.i;
+			assert(generic(p->kids[1]->op) == INDIR);
+			a = nodeval(p->kids[0]);
+			b = nodeval(p->kids[1]);
+			/* one at a time: the pool must not depend on the order of
+			   evaluation of arguments */
+			c = iconst(p->syms[0]->u.c.v.i, "i64");
+			v = boolconst(p->volatil || p->kids[1]->volatil);
+			inst("llvm.call_intrinsic \"llvm.memcpy.p0.p0.i64\"(%s, %s, %s, %s) : "
+				"(!llvm.ptr {llvm.align = %d : i64}, !llvm.ptr {llvm.align = %d : i64}, i64, i1) -> ()",
+				a, b, c, v, align, align);
 			break;
 		}
 		a = nodeval(p->kids[0]);
