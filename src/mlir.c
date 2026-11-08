@@ -641,15 +641,18 @@ static struct block *blockof(char *name) {
 	return b;
 }
 
-/* startblock - start block name */
-static void startblock(char *name) {
+/* startblock - start block name, with arguments params or NULL */
+static void startblock(char *name, char *params) {
 	cur = blockof(name);
 	assert(!cur->defined);
 	cur->defined = 1;
 	cur->start = ftell(body);
 	*bdtail = cur;
 	bdtail = &cur->dlink;
-	fprint(body, "^%s:\n", cur->name);
+	if (params)
+		fprint(body, "^%s(%s):\n", cur->name, params);
+	else
+		fprint(body, "^%s:\n", cur->name);
 	terminated = 0;
 }
 
@@ -659,7 +662,7 @@ static void inst(const char *fmt, ...) {
 	va_list ap;
 
 	if (terminated)
-		startblock(stringf("b%d", ++nblock));
+		startblock(stringf("b%d", ++nblock), NULL);
 	fprint(body, "  ");
 	va_start(ap, fmt);
 	vfprint(body, NULL, fmt, ap);
@@ -688,9 +691,13 @@ static void edge(char *name) {
 	cur->succs = s;
 }
 
-/* br - end the current block with a jump to block name */
-static void br(char *name) {
-	inst("cf.br ^%s", name);
+/* br - end the current block with a jump to block name, passing argv
+   (as values : types) or NULL */
+static void br(char *name, char *argv) {
+	if (argv)
+		inst("cf.br ^%s(%s)", name, argv);
+	else
+		inst("cf.br ^%s", name);
 	edge(name);
 	terminated = 1;
 }
@@ -1192,6 +1199,195 @@ static char *gepconst(char *p, long n) {
 	return v;
 }
 
+/* ssepart - is part t passed in an SSE register? */
+static int ssepart(char *t) {
+	return strcmp(t, "f32") == 0 || strcmp(t, "f64") == 0;
+}
+
+/*
+ * vaaddr - emit the address of the next argument of type ty in va_list
+ * ap, and step ap past it, as the SysV ABI does: in the register save
+ * area if all of its registers are left, else in the overflow area.
+ * The two paths join in a block whose argument is the address.  A
+ * structure split between an SSE register and another one is copied
+ * from the save area to slot, and its address is slot.
+ */
+static char *vaaddr(char *ap, Type ty, char *slot) {
+	char *part[2], *gp = NULL, *fp = NULL, *fpp = NULL, *c = NULL, *c2, *t;
+	char *rsa, *ra, *ovp, *ov, *a, *reg, *mem, *done, *src, *dst, *v;
+	int i, n, ngp = 0, nfp = 0, ig = 0, is = 0;
+	struct regs r;
+
+	if (isstruct(ty)) {
+		r.gp = 6;
+		r.fp = 8;
+		n = structparts(ty, &r, part);
+	} else if (isfloat(ty) && ty->size > doubletype->size)
+		n = 0;	/* class X87: always in memory */
+	else {
+		n = 1;
+		part[0] = isfloat(ty) ? "f64" : "i64";
+	}
+	for (i = 0; i < n; i++)
+		if (ssepart(part[i]))
+			nfp++;
+		else
+			ngp++;
+	/* gp_offset at 0, fp_offset at 4, overflow_arg_area at 8,
+	   reg_save_area at 16 */
+	if (ngp > 0) {
+		gp = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> i32", gp, ap);
+		c = newreg();
+		inst("%s = arith.cmpi ule, %s, %s : i32", c, gp, iconst(6*8 - 8*ngp, "i32"));
+	}
+	if (nfp > 0) {
+		fpp = gepconst(ap, 4);
+		fp = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> i32", fp, fpp);
+		c2 = newreg();
+		inst("%s = arith.cmpi ule, %s, %s : i32", c2, fp,
+			iconst(6*8 + 8*16 - 16*nfp, "i32"));
+		if (c) {
+			t = newreg();
+			inst("%s = arith.andi %s, %s : i1", t, c, c2);
+			c2 = t;
+		}
+		c = c2;
+	}
+	mem = stringf("b%d", ++nblock);
+	done = stringf("b%d", ++nblock);
+	a = newreg();
+	if (c) {
+		reg = stringf("b%d", ++nblock);
+		condbr(c, reg, mem);
+		startblock(reg, NULL);
+		rsa = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", rsa, gepconst(ap, 16));
+		ra = newreg();
+		inst("%s = llvm.getelementptr %s[%s] : (!llvm.ptr, i32) -> !llvm.ptr, i8",
+			ra, rsa, gp ? gp : fp);
+		assert(slot || nfp == 0 || n == 1);
+		if (slot) {
+			for (i = 0; i < n; i++) {
+				src = newreg();
+				inst("%s = llvm.getelementptr %s[%s] : (!llvm.ptr, i32) -> !llvm.ptr, i8",
+					src, rsa, ssepart(part[i]) ? fp : gp);
+				if (ssepart(part[i]) ? is++ : ig++)
+					src = gepconst(src, ssepart(part[i]) ? 16 : 8);
+				dst = i > 0 ? gepconst(slot, 8*i) : slot;
+				v = newreg();
+				inst("%s = llvm.load %s {alignment = 8 : i64} : !llvm.ptr -> %s",
+					v, src, part[i]);
+				inst("llvm.store %s, %s {alignment = %d : i64} : %s, !llvm.ptr",
+					v, dst, ty->align, part[i]);
+			}
+			ra = slot;
+		}
+		if (ngp > 0) {
+			t = newreg();
+			inst("%s = arith.addi %s, %s : i32", t, gp, iconst(8*ngp, "i32"));
+			inst("llvm.store %s, %s : i32, !llvm.ptr", t, ap);
+		}
+		if (nfp > 0) {
+			t = newreg();
+			inst("%s = arith.addi %s, %s : i32", t, fp, iconst(16*nfp, "i32"));
+			inst("llvm.store %s, %s : i32, !llvm.ptr", t, fpp);
+		}
+		br(done, stringf("%s : !llvm.ptr", ra));
+	} else
+		br(mem, NULL);
+	startblock(mem, NULL);
+	ovp = gepconst(ap, 8);
+	ov = newreg();
+	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", ov, ovp);
+	if (ty->align > 8) {	/* round up to 16 */
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = llvm.ptrtoint %s : !llvm.ptr to i64", x, ov);
+		inst("%s = arith.addi %s, %s : i64", y, x, iconst(15, "i64"));
+		inst("%s = arith.andi %s, %s : i64", z, y, iconst(-16, "i64"));
+		inst("%s = llvm.inttoptr %s : i64 to !llvm.ptr", w, z);
+		ov = w;
+	}
+	inst("llvm.store %s, %s : !llvm.ptr, !llvm.ptr", gepconst(ov, roundup(ty->size, 8)),
+		ovp);
+	br(done, stringf("%s : !llvm.ptr", ov));
+	startblock(done, stringf("%s: !llvm.ptr", a));
+	return a;
+}
+
+/*
+ * builtin - which stdarg function the call p is to, or 0.  stdarg.h
+ * declares __builtin_va_start and __builtin_va_end, and the front end
+ * makes __builtin_va_arg(ap, T) a call to a __builtin_va_arg returning
+ * T *.  They take the va_list as their only argument.
+ */
+enum { VASTART = 1, VAARG, VAEND };
+static int builtin(Node p) {
+	char *name;
+
+	if (specific(p->kids[0]->op) != ADDRG+P)
+		return 0;
+	name = p->kids[0]->syms[0]->name;
+	if (strncmp(name, "__builtin_va_", 13) != 0)
+		return 0;
+	if (strcmp(name + 13, "start") == 0)
+		return VASTART;
+	if (strcmp(name + 13, "arg") == 0)
+		return VAARG;
+	if (strcmp(name + 13, "end") == 0)
+		return VAEND;
+	return 0;
+}
+
+/*
+ * emitbuiltin - emit call p to stdarg builtin b, return its value.  A
+ * va_arg whose value is not in the argument area as it is gets a slot
+ * in the prologue: a float arrives as a double, and see vaaddr.
+ */
+static char *emitbuiltin(Node p, int b) {
+	char *ap, *v, *d, *slot = NULL;
+	Type ty;
+
+	if (args == NULL || args->link != NULL) {
+		error("`%s' takes the va_list as its only argument\n",
+			p->kids[0]->syms[0]->name);
+		args = NULL;
+		argtail = &args;
+		return b == VAARG ? ptrconst(NULL) : "";
+	}
+	ap = args->val;
+	args = NULL;
+	argtail = &args;
+	switch (b) {
+	case VASTART:
+		if (!variadic(cfunc->type))
+			error("`va_start' used in a function with fixed arguments\n");
+		inst("llvm.intr.vastart %s : !llvm.ptr", ap);
+		return "";
+	case VAEND:
+		inst("llvm.intr.vaend %s : !llvm.ptr", ap);
+		return "";
+	}
+	assert(b == VAARG);
+	ty = unqual(freturn(p->syms[0]->type)->type);
+	if (sysv_needsslot(ty)) {
+		slot = stringf("%%va%d", ++nlocal);
+		pinst("%s = llvm.alloca %s x %s {alignment = %d : i64} : (i32) -> !llvm.ptr",
+			slot, iconst(1, "i32"), typestr(ty), ty->align);
+	}
+	v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
+	if (slot && !isstruct(ty)) {	/* a float, which came as a double */
+		d = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> f64", d, v);
+		v = newreg();
+		inst("%s = arith.truncf %s : f64 to f32", v, d);
+		inst("llvm.store %s, %s : f32, !llvm.ptr", v, slot);
+		v = slot;
+	}
+	return v;
+}
+
 /*
  * emitcall - emit call p, return its value: a func.call if it is a
  * direct call of a func.func whose type matches the call's, else an
@@ -1213,11 +1409,8 @@ static char *emitcall(Node p) {
 	int i, j, n, narrow = 0, hasattr = 0, nres = 0;
 	int nfixed = -1;	/* -1: all arguments are fixed */
 
-	if (f && strncmp(f->name, "__builtin_va_", 13) == 0) {
-		args = NULL;
-		argtail = &args;
-		return unsupported(p);
-	}
+	if ((i = builtin(p)) != 0)
+		return emitbuiltin(p, i);
 	if (isstruct(rty)) {	/* args has its address first */
 		assert(args && args->type && strcmp(args->type, "!llvm.ptr") == 0);
 		res = args;
@@ -1549,16 +1742,16 @@ static void emitnode(Node p) {
 			inst("%s = arith.cmpi %s, %s, %s : %s", c, cmppred(p->op), a, b,
 				optypestr(p->op));
 		condbr(c, gname(p->syms[0]), fall);
-		startblock(fall);
+		startblock(fall, NULL);
 		break;
 	case LABEL:
 		if (!terminated)
-			br(gname(p->syms[0]));
-		startblock(gname(p->syms[0]));
+			br(gname(p->syms[0]), NULL);
+		startblock(gname(p->syms[0]), NULL);
 		break;
 	case JUMP:
 		if (specific(p->kids[0]->op) == ADDRG+P)
-			br(gname(p->kids[0]->syms[0]));
+			br(gname(p->kids[0]->syms[0]), NULL);
 		else
 			emitswitch(p);
 		break;
