@@ -28,6 +28,8 @@ struct item {
 	Item link;
 };
 static Symbol pending;		/* global being initialized */
+static Symbol swtable;		/* table of the switch just emitted as cf.switch */
+static int skipping;		/* the global being initialized is that table */
 static Item items, *itail;	/* its initial value so far */
 
 /*
@@ -589,6 +591,7 @@ static int nreg, nblock, nlocal, ncst;
 static char *rettype;		/* type of %retval, NULL if none */
 static char *restype;		/* result type, NULL if none */
 static int fkind;		/* FUNCFUNC or LLVMFUNC: the current function */
+static Node emitting;		/* the forest being emitted */
 
 static char *nodeval(Node);
 
@@ -1327,6 +1330,55 @@ static char *fcmppred(Node p) {
 	return NULL;
 }
 
+/* equated - the label that p was made equal to, as in dag.c */
+static Symbol equated(Symbol p) {
+	while (p->u.l.equatedto)
+		p = p->u.l.equatedto;
+	return p;
+}
+
+/*
+ * emitswitch - emit the indirect jump p through a switch table as a
+ * cf.switch.  The front end makes one only for a switch: the code list
+ * entry right after the jump's has the variable switched on, which is
+ * read again, and the cases.  Values missing from the table go to the
+ * default, and those out of its range never reach the jump.  The table
+ * itself is not emitted: global() skips it.
+ */
+static void emitswitch(Node p) {
+	Code cp;
+	Symbol sym, lab;
+	char *v, *ty;
+	int i;
+
+	for (cp = codehead.next; cp; cp = cp->next)
+		if (cp->kind == Gen && cp->u.forest == emitting)
+			break;
+	if (cp == NULL || (cp = cp->next) == NULL || cp->kind != Switch) {
+		unsupported(p);
+		return;
+	}
+	sym = cp->u.swtch.sym;
+	ty = typestr(sym->type);
+	v = newreg();
+	inst("%s = llvm.load %s : !llvm.ptr -> %s", v, sym->scope == GLOBAL
+		|| sym->sclass == STATIC || sym->sclass == EXTERN ? gaddrval(sym, 0)
+		: gname(sym), ty);
+	lab = equated(cp->u.swtch.deflab);
+	inst("cf.switch %s : %s, [", v, ty);
+	fprint(body, "    default: ^%s", gname(lab));
+	edge(gname(lab));
+	for (i = 0; i < cp->u.swtch.size; i++) {
+		lab = equated(cp->u.swtch.labels[i]);
+		fprint(body, ",\n    %D: ^%s", sext(cp->u.swtch.values[i],
+			sym->type->size), gname(lab));
+		edge(gname(lab));
+	}
+	fprint(body, "\n  ]\n");
+	terminated = 1;
+	swtable = cp->u.swtch.table;
+}
+
 static void emitnode(Node p) {
 	char *a, *b, *c, *v, *fall;
 	struct arg *arg;
@@ -1354,11 +1406,10 @@ static void emitnode(Node p) {
 		startblock(gname(p->syms[0]));
 		break;
 	case JUMP:
-		if (specific(p->kids[0]->op) != ADDRG+P) {
-			unsupported(p);
-			break;
-		}
-		br(gname(p->kids[0]->syms[0]));
+		if (specific(p->kids[0]->op) == ADDRG+P)
+			br(gname(p->kids[0]->syms[0]));
+		else
+			emitswitch(p);
 		break;
 	case ASGN:
 		if (optype(p->op) == B) {	/* kids[1] is INDIRB */
@@ -1447,6 +1498,8 @@ static void I(defaddress)(Symbol p) {
 	Item it;
 	long n = 0;
 
+	if (skipping)
+		return;
 	if (a) {
 		n = a->n;
 		p = a->p;
@@ -1463,8 +1516,11 @@ static void I(defaddress)(Symbol p) {
 
 /* defconst - define a constant */
 static void I(defconst)(int suffix, int size, Value v) {
-	Item it = newitem(Kconst);
+	Item it;
 
+	if (skipping)
+		return;
+	it = newitem(Kconst);
 	assert(suffix == I || suffix == U || suffix == P || suffix == F);
 	it->suffix = suffix;
 	it->size = size;
@@ -1473,8 +1529,11 @@ static void I(defconst)(int suffix, int size, Value v) {
 
 /* defstring - emit a string constant */
 static void I(defstring)(int len, char *s) {
-	Item it = newitem(Kstring);
+	Item it;
 
+	if (skipping)
+		return;
+	it = newitem(Kstring);
 	it->s = memcpy(allocate(len, PERM), s, len);
 	it->n = len;
 }
@@ -1499,7 +1558,7 @@ static void I(defsymbol)(Symbol p) {
 }
 
 static void I(emit)(Node p) {
-	for ( ; p; p = p->link)
+	for (emitting = p; p; p = p->link)
 		emitnode(p);
 }
 static void I(export)(Symbol p) {}
@@ -1641,6 +1700,10 @@ static Node I(gen)(Node p) {
 /* global - announce a global */
 static void I(global)(Symbol p) {
 	flushglobal();
+	if ((skipping = p == swtable) != 0) {
+		swtable = NULL;
+		return;
+	}
 	pending = p;
 	items = NULL;
 	itail = &items;
@@ -1729,7 +1792,8 @@ static void I(segment)(int s) {}
 
 /* space - initialize n bytes of space */
 static void I(space)(int n) {
-	newitem(Kspace)->n = n;
+	if (!skipping)
+		newitem(Kspace)->n = n;
 }
 
 static void I(stabblock)(int brace, int lev, Symbol *p) {}

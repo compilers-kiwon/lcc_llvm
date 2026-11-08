@@ -3,8 +3,9 @@
  * go to default, sparse ones that make comparisons, both in one switch
  * (several tables), no default, fall through, negative and unsigned
  * values, values near the ends of long, char, short and unsigned
- * selectors, a selector read from a global, nested switches, and
- * switches in loops with break and continue.  Compiled by lcc;
+ * selectors, a selector read from a global, nested switches,
+ * switches in loops with break and continue, a dense switch that no
+ * path reaches and one whose cases go back to it by goto.  Compiled by lcc;
  * switch-drv.c includes this file again, compiled by clang, and
  * compares the results.
  */
@@ -169,4 +170,24 @@ long run(const char *prog, long x) {
 		n += acc & 1;
 	}
 	return acc - 1000 * n;
+}
+/* a dense switch after return: its table and cases are never reached */
+int deadsw(int x) {
+	return x + 1;
+	switch (x) {
+	case 1: x = 10; break; case 2: x = 20; break; case 3: x = 30; break;
+	case 4: x = 40; break; case 5: x = 50; break; case 6: x = 60; break;
+	}
+	return x;
+}
+/* cases that go back to the switch */
+int gotosw(int x) {
+	int n = 0;
+again:
+	n++;
+	switch (x) {
+	case 0: x = 3; goto again; case 1: x = 0; goto again; case 2: x = 5; goto again;
+	case 3: x = 7; break; case 4: x = 1; goto again; case 5: return -n;
+	}
+	return x + 100*n;
 }

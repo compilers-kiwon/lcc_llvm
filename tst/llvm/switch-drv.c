@@ -21,6 +21,8 @@
 #define exprsw r_exprsw
 #define nested r_nested
 #define run r_run
+#define deadsw r_deadsw
+#define gotosw r_gotosw
 #include "switch.c"
 #undef swglobal
 #undef dense
@@ -39,10 +41,13 @@
 #undef exprsw
 #undef nested
 #undef run
+#undef deadsw
+#undef gotosw
 extern int swglobal;
 int dense(int), nodefault(int), fallthrough(int), clusters(int), sparse(long), longends(long);
 int ulongsw(unsigned long), unsignedsw(unsigned), charsw(char), ucharsw(unsigned char), shortsw(short);
 int enumsw(enum color), globalsw(void), exprsw(int, int), nested(int, int); long run(const char *, long);
+int deadsw(int), gotosw(int);
 static int bad, n;
 #define CHK(e, w, fmt) do { n++; if ((e) != (w)) { bad++; printf("%s: " fmt " != " fmt "\n", #e, e, w); } } while (0)
 static long lvals[] = { 0, 1, 7, 1000, 123456789L, -987654321L, LONG_MAX, LONG_MIN, LONG_MAX - 1, LONG_MAX - 4,
@@ -56,6 +61,7 @@ int main(void) {
 		CHK(exprsw(1, i), r_exprsw(1, i), "%d");
 		for (j = -2; j < 10; j++) CHK(nested(i, j), r_nested(i, j), "%d");
 		swglobal = r_swglobal = i; CHK(globalsw(), r_globalsw(), "%d");
+		CHK(deadsw(i), r_deadsw(i), "%d"); CHK(gotosw(i), r_gotosw(i), "%d");
 	}
 	for (i = -1100000; i <= 6000; i += (i < -999990 || i > -10 && i < 1100 || i > 4990) ? 1 : 997)
 		CHK(clusters(i), r_clusters(i), "%d");
