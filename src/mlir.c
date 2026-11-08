@@ -574,6 +574,7 @@ struct fninfo {
 	Symbol p;
 	int kind;
 	char *params;		/* FUNCFUNC: types of the parameters ... */
+	char *typed;		/* ... with their attributes ... */
 	char *result;		/* ... and of the result, NULL if none */
 	char *type;		/* ... as a function type */
 	struct fninfo *link;
@@ -583,6 +584,9 @@ static struct fninfo *fninfos[256];
 /* arguments listed since the last call; they all belong to the next CALL */
 struct arg {
 	char *type, *val;
+	Type sty;	/* a structure: val is its address, type is NULL */
+	char *attr;	/* attributes, as byval */
+	int fixed;	/* matches a parameter, not ... */
 	struct arg *link;
 };
 static struct arg *args, **argtail = &args;
@@ -926,11 +930,61 @@ static struct fninfo *fninfo(Symbol p) {
 	return f;
 }
 
+/* mlirpart - the MLIR type of a part that sysv.c names in LLVM's way */
+static char *mlirpart(char *t) {
+	return strcmp(t, "double") == 0 ? "f64" : strcmp(t, "float") == 0 ? "f32"
+		: strcmp(t, "x86_fp80") == 0 ? "f80" : t;
+}
+
+/* scalarreg - take a register for a scalar argument of MLIR type t */
+static void scalarreg(char *t, struct regs *r) {
+	sysv_scalarreg(strcmp(t, "f64") == 0 ? "double" : strcmp(t, "f32") == 0
+		? "float" : strcmp(t, "f80") == 0 ? "x86_fp80" : t, r);
+}
+
+/* structparts - sysv_structparts, with MLIR types */
+static int structparts(Type ty, struct regs *r, char *part[]) {
+	int i, n = sysv_structparts(ty, r, part);
+
+	for (i = 0; i < n; i++)
+		part[i] = mlirpart(part[i]);
+	return n;
+}
+
+/* retparts - sysv_retparts, with MLIR types */
+static int retparts(Type ty, char *part[]) {
+	int i, n = sysv_retparts(ty, part);
+
+	for (i = 0; i < n; i++)
+		part[i] = mlirpart(part[i]);
+	return n;
+}
+
+/* byvalstr - attributes of a structure argument ty passed in memory */
+static char *byvalstr(Type ty) {
+	return stringf("{llvm.byval = !llvm.array<%d x i8>, llvm.align = %d : i64}",
+		ty->size, ty->align < 8 ? 8 : ty->align);
+}
+
+/* sretstr - attributes of the address of the structure result ty */
+static char *sretstr(Type ty) {
+	return stringf("{llvm.sret = !llvm.array<%d x i8>, llvm.align = %d : i64}",
+		ty->size, ty->align);
+}
+
 /* restypestr - result type of function type fty, NULL if none: a char
-   or short result has its own type, which callers extend */
+   or short result has its own type, which callers extend; a structure
+   in registers is their type, and one in memory has none */
 static char *restypestr(Type fty) {
 	Type rty = unqual(freturn(fty));
+	char *part[2];
 
+	if (isstruct(rty))
+		switch (retparts(rty, part)) {
+		case 0: return NULL;
+		case 1: return part[0];
+		default: return stringf("!llvm.struct<(%s, %s)>", part[0], part[1]);
+		}
 	return rty->op == VOID ? NULL : typestr(rty);
 }
 
@@ -938,8 +992,8 @@ static char *restypestr(Type fty) {
 static char *rettypestr(Type fty) {
 	Type rty = unqual(freturn(fty));
 
-	if (rty->op == VOID)
-		return NULL;
+	if (rty->op == VOID || isstruct(rty))
+		return restypestr(fty);
 	if (isint(rty) || isenum(rty))
 		rty = promote(rty);
 	return typestr(rty);
@@ -1051,18 +1105,51 @@ static char *fntypestr(char *params, char *res) {
 	return cat("(", params, ") -> ", res ? res : "()", NULL);
 }
 
-/* hasstruct - does function type fty have a structure parameter or
-   result? */
-static int hasstruct(Type fty) {
-	Type *proto = fty->u.f.proto;
-	int i;
+/* addparam - add a parameter of type ty with attributes attr (or NULL)
+   and name to the lists of sigparams */
+static void addparam(char **plain, char **typed, char **named, char *ty,
+	char *attr, char *name) {
+	char *sep = **plain ? ", " : "";
 
-	if (isstruct(freturn(fty)))
-		return 1;
-	for (i = 0; proto && proto[i]; i++)
-		if (isstruct(proto[i]))
-			return 1;
-	return 0;
+	*plain = cat(*plain, sep, ty, NULL);
+	*typed = cat(*typed, sep, ty, attr ? " " : "", attr ? attr : "", NULL);
+	*named = cat(*named, sep, name, ": ", ty, attr ? " " : "", attr ? attr : "",
+		NULL);
+}
+
+/*
+ * sigparams - the parameters of a function with result type rty and
+ * parameter types ty[0..n-1] as the ABI passes them: their types in
+ * *plain, with attributes in *typed, and with names too in *named.  The
+ * address of a structure result in memory comes first as %a0 (sret);
+ * the others are %a<base+i>, or %a<base+i>.<j> for the parts of a
+ * structure in registers, or else they are passed in memory (byval).
+ */
+static void sigparams(Type rty, Type ty[], int n, int base, char **plain,
+	char **typed, char **named) {
+	struct regs r;
+	char *part[2], *t;
+	int i, j, k;
+
+	*plain = *typed = *named = "";
+	r.gp = 6;
+	r.fp = 8;
+	if (isstruct(rty) && retparts(rty, part) == 0) {
+		addparam(plain, typed, named, "!llvm.ptr", sretstr(rty), "%a0");
+		r.gp--;
+	}
+	for (i = 0; i < n; i++)
+		if (!isstruct(ty[i])) {
+			t = argtypestr(ty[i]);
+			addparam(plain, typed, named, t, NULL, stringf("%%a%d", base + i));
+			scalarreg(t, &r);
+		} else if ((k = structparts(ty[i], &r, part)) == 0)
+			addparam(plain, typed, named, "!llvm.ptr", byvalstr(ty[i]),
+				stringf("%%a%d", base + i));
+		else
+			for (j = 0; j < k; j++)
+				addparam(plain, typed, named, part[j], NULL,
+					stringf("%%a%d.%d", base + i, j));
 }
 
 /*
@@ -1074,7 +1161,8 @@ static int hasstruct(Type fty) {
 static int fnref(Symbol p) {
 	struct fninfo *f = fninfo(p);
 	Type fty = p->type, *proto = fty->u.f.proto;
-	int i;
+	char *named;
+	int n;
 
 	if (f->kind != UNDECIDED)
 		return f->kind;
@@ -1082,11 +1170,10 @@ static int fnref(Symbol p) {
 		f->kind = LLVMFUNC;
 		return f->kind;
 	}
-	assert(!hasstruct(fty));	/* see the callers */
 	f->kind = FUNCFUNC;
-	f->params = "";
-	for (i = 0; proto[i] && proto[i] != voidtype; i++)
-		f->params = cat(f->params, i ? ", " : "", argtypestr(proto[i]), NULL);
+	for (n = 0; proto[n] && proto[n] != voidtype; n++)
+		;
+	sigparams(freturn(fty), proto, n, 0, &f->params, &f->typed, &named);
 	f->result = restypestr(fty);
 	f->type = fntypestr(f->params, f->result);
 	return f->kind;
@@ -1097,62 +1184,128 @@ static char *functype(Symbol p) {
 	return fnref(p) == FUNCFUNC ? fninfo(p)->type : NULL;
 }
 
-/* fnaddrok - can the address of function p be taken?  Not yet if it
-   has structure parameters or results */
-static int fnaddrok(Symbol p) {
-	return !isfunc(p->type) || !hasstruct(p->type);
+/* gepconst - emit the address p plus n bytes, return it */
+static char *gepconst(char *p, long n) {
+	char *v = newreg();
+
+	inst("%s = llvm.getelementptr %s[%D] : (!llvm.ptr) -> !llvm.ptr, i8", v, p, n);
+	return v;
 }
 
 /*
  * emitcall - emit call p, return its value: a func.call if it is a
  * direct call of a func.func whose type matches the call's, else an
  * llvm.call through a pointer, vararg if the call's type has no
- * prototype or is variadic.  A char or short result is extended: its
- * upper bits are undefined.
+ * prototype or is variadic.  The ABI attributes go on the call too.  A
+ * char or short result is extended: its upper bits are undefined.
+ * Structures are passed and returned as sigparams says: the front end
+ * passes the address of a structure result first.
  */
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
 	Node k = p->kids[0];
 	Symbol f = specific(k->op) == ADDRG+P ? k->syms[0] : NULL;
-	struct arg *a;
-	char *rt = optype(p->op) == V ? NULL : optypestr(p->op);
-	char *plain = "", *fixed = "", *operands = "", *v = NULL, *w;
-	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
+	struct arg *a, *b, *list = NULL, **tail = &list, *res = NULL;
+	struct regs r;
+	char *rt = optype(p->op) == V ? NULL : optypestr(p->op), *rpart[2], *part[2];
+	char *plain = "", *typed = "", *attrs = "", *fixed = "", *operands = "";
+	char *v = NULL, *w, *addr;
+	int i, j, n, narrow = 0, hasattr = 0, nres = 0;
+	int nfixed = -1;	/* -1: all arguments are fixed */
 
-	if (isstruct(rty) || f && (strncmp(f->name, "__builtin_va_", 13) == 0
-	|| isfunc(f->type) && hasstruct(f->type))) {
+	if (f && strncmp(f->name, "__builtin_va_", 13) == 0) {
 		args = NULL;
 		argtail = &args;
 		return unsupported(p);
+	}
+	if (isstruct(rty)) {	/* args has its address first */
+		assert(args && args->type && strcmp(args->type, "!llvm.ptr") == 0);
+		res = args;
+		if ((nres = retparts(rty, rpart)) > 0) {
+			args = args->link;
+			rt = restypestr(fty);
+		} else
+			res->attr = sretstr(rty);
 	}
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
 		nfixed = 0;
 	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
+	if (nfixed >= 0 && nres == 0 && isstruct(rty))
+		nfixed++;	/* the result address is fixed: sret is not allowed in ... */
 	if (rt && (isint(rty) || isenum(rty)) && rty->size < opsize(p->op)) {
 		rt = typestr(rty);
 		narrow = 1;
 	}
+	/* pass structures in registers or in memory */
+	r.gp = 6;
+	r.fp = 8;
 	for (i = 0, a = args; a; i++, a = a->link) {
-		plain = cat(plain, i ? ", " : "", a->type, NULL);
-		operands = cat(operands, i ? ", " : "", a->val, NULL);
-		if (nfixed < 0 || i < nfixed)
-			fixed = cat(fixed, i ? ", " : "", a->type, NULL);
+		a->fixed = nfixed < 0 || i < nfixed;
+		n = 0;
+		if (a->sty == NULL)
+			scalarreg(a->type, &r);
+		else if ((n = structparts(a->sty, &r, part)) == 0) {
+			a->type = "!llvm.ptr";
+			a->attr = byvalstr(a->sty);
+		}
+		if (n == 0) {
+			*tail = a;
+			tail = &a->link;
+			continue;
+		}
+		for (j = 0; j < n; j++) {
+			NEW0(b, FUNC);
+			b->type = part[j];
+			b->fixed = a->fixed;
+			b->val = newreg();
+			addr = j > 0 ? gepconst(a->val, 8*j) : a->val;
+			inst("%s = llvm.load %s {alignment = %d : i64} : !llvm.ptr -> %s",
+				b->val, addr, a->sty->align, part[j]);
+			*tail = b;
+			tail = &b->link;
+		}
 	}
+	*tail = NULL;
 	args = NULL;
 	argtail = &args;
+	for (i = 0, a = list; a; i++, a = a->link) {
+		plain = cat(plain, i ? ", " : "", a->type, NULL);
+		typed = cat(typed, i ? ", " : "", a->type, a->attr ? " " : "",
+			a->attr ? a->attr : "", NULL);
+		attrs = cat(attrs, i ? ", " : "", a->attr ? a->attr : "{}", NULL);
+		operands = cat(operands, i ? ", " : "", a->val, NULL);
+		if (a->fixed)
+			fixed = cat(fixed, i ? ", " : "", a->type, NULL);
+		if (a->attr)
+			hasattr = 1;
+	}
 	if (rt)
 		v = newreg();
 	if (f && isfunc(f->type) && gaddr(f) == NULL && nfixed < 0
 	&& fnref(f) == FUNCFUNC && strcmp(fninfo(f)->type, fntypestr(plain, rt)) == 0)
-		inst("%s%sfunc.call @\"%s\"(%s) : (%s) -> %s", v ? v : "", v ? " = " : "",
-			gname(f), operands, plain, rt ? rt : "()");
+		inst("%s", cat(v ? v : "", v ? " = " : "", "func.call @\"", gname(f), "\"(",
+			operands, ")", hasattr ? cat(" {arg_attrs = [", attrs, "]}", NULL) : "",
+			" : (", plain, ") -> ", rt ? rt : "()", NULL));
 	else
 		inst("%s", cat(v ? v : "", v ? " = " : "", "llvm.call ", nodeval(k),
 			"(", operands, ")", nfixed < 0 ? "" : cat(" vararg(!llvm.func<",
 			rt ? rt : "void", " (", fixed, *fixed ? ", " : "", "...)>)", NULL),
-			" : !llvm.ptr, (", plain, ") -> ", rt ? rt : "()", NULL));
+			" : !llvm.ptr, (", typed, ") -> ", rt ? rt : "()", NULL));
+	if (nres > 0) {	/* store the registers at the result address */
+		for (i = 0; i < nres; i++) {
+			w = v;
+			if (nres > 1) {
+				w = newreg();
+				inst("%s = llvm.extractvalue %s[%d] : %s", w, v, i, rt);
+			}
+			addr = i > 0 ? gepconst(res->val, 8*i) : res->val;
+			inst("llvm.store %s, %s {alignment = %d : i64} : %s, !llvm.ptr",
+				w, addr, rty->align, rpart[i]);
+		}
+		return "";
+	}
 	if (v == NULL)
 		return "";
 	if (narrow) {
@@ -1179,11 +1332,9 @@ static char *nodeval(Node p) {
 	case ADDRG:
 		q = p->syms[0];
 		if ((g = gaddr(q)) != NULL)
-			v = fnaddrok(g->p) ? gaddrval(g->p, g->n) : NULL;
+			v = gaddrval(g->p, g->n);
 		else
-			v = fnaddrok(q) ? gaddrval(q, 0) : NULL;
-		if (v == NULL)
-			return unsupported(p);
+			v = gaddrval(q, 0);
 		break;
 	case ADDRF: case ADDRL:
 		v = gname(p->syms[0]);
@@ -1438,14 +1589,15 @@ static void emitnode(Node p) {
 				opnd(p->kids[0], p->op), optypestr(p->op));
 		break;
 	case ARG:
-		if (optype(p->op) == B) {
-			unsupported(p);
-			break;
+		NEW0(arg, FUNC);
+		if (optype(p->op) == B) {	/* dag.c types its size */
+			arg->sty = p->syms[0]->type;
+			assert(isstruct(arg->sty));
+			arg->val = nodeval(p->kids[0]);
+		} else {
+			arg->type = optypestr(p->op);
+			arg->val = opnd(p->kids[0], p->op);
 		}
-		NEW(arg, FUNC);
-		arg->type = optypestr(p->op);
-		arg->val = opnd(p->kids[0], p->op);
-		arg->link = NULL;
 		*argtail = arg;
 		argtail = &arg->link;
 		break;
@@ -1504,9 +1656,9 @@ static void I(defaddress)(Symbol p) {
 		n = a->n;
 		p = a->p;
 	}
-	if (p->scope == LABELS || !fnaddrok(p)) {
-		error("mlir back end: unsupported address of %s `%s' in global data\n",
-			p->scope == LABELS ? "label" : "function", p->name);
+	if (p->scope == LABELS) {	/* a switch table is not emitted */
+		error("mlir back end: unsupported address of label `%s' in global data\n",
+			p->name);
 		return;
 	}
 	it = newitem(Kaddr);
@@ -1567,38 +1719,39 @@ static void I(export)(Symbol p) {}
  * function - generate code for function f: a func.func, or an llvm.func
  * if it is variadic or -llvmfunc is given.  Its parameters have the
  * types of caller[]: the front end promotes the integer parameters of
- * prototyped definitions.
+ * prototyped definitions.  A structure result comes as an address in
+ * caller[0]: one in registers goes in %retval instead.
  */
 static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
-	int i;
+	Type rty = freturn(f->type), *ty;
+	int i, j, n, nres = 0, base = isstruct(rty);
 	struct fninfo *fi;
 	struct laddr *a;
-	char *v, *w, *params;
+	struct regs r;
+	char *v, *w, *plain, *typed, *named, *part[2];
 
 	flushglobal();
-	for (i = 0; caller[i]; i++)
-		if (isstruct(caller[i]->type))
-			break;
-	if (isstruct(freturn(f->type)) || caller[i]) {
-		error("mlir back end: unsupported structure %s of `%s'\n",
-			caller[i] ? "parameter" : "result", f->name);
-		return;
-	}
 	rettype = rettypestr(f->type);
 	restype = restypestr(f->type);
-	params = "";
-	for (i = 0; caller[i]; i++)
-		params = cat(params, i ? ", " : "", typestr(caller[i]->type), NULL);
+	if (isstruct(rty))
+		nres = retparts(rty, part);
+	for (n = 0; caller[n]; n++)
+		;
+	ty = newarray(n + 1, sizeof *ty, FUNC);
+	for (i = 0; i < n; i++)
+		ty[i] = caller[i]->type;
+	sigparams(rty, ty + base, n - base, base, &plain, &typed, &named);
 	fi = fninfo(f);
 	if (fi->kind == UNDECIDED) {
 		fi->kind = variadic(f->type) || llvmfunc ? LLVMFUNC : FUNCFUNC;
-		fi->params = params;
+		fi->params = plain;
+		fi->typed = typed;
 		fi->result = restype;
-		fi->type = fntypestr(params, restype);
+		fi->type = fntypestr(plain, restype);
 	} else if (fi->kind == FUNCFUNC
-	&& strcmp(fi->type, fntypestr(params, restype)) != 0) {
+	&& strcmp(fi->type, fntypestr(plain, restype)) != 0) {
 		error("mlir back end: `%s' is defined as %s but was used as %s\n",
-			f->name, fntypestr(params, restype), fi->type);
+			f->name, fntypestr(plain, restype), fi->type);
 		return;
 	}
 	fkind = fi->kind;
@@ -1623,11 +1776,9 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	fprint(module, "%s ", fkind == FUNCFUNC ? "func.func" : "llvm.func");
 	if (fkind == LLVMFUNC && f->sclass == STATIC)
 		fprint(module, "internal ");
-	fprint(module, "@\"%s\"(", gname(f));
-	for (i = 0; caller[i]; i++)
-		fprint(module, "%s%%a%d: %s", i ? ", " : "", i, typestr(caller[i]->type));
+	fprint(module, "@\"%s\"(%s", gname(f), named);
 	if (variadic(f->type))
-		fprint(module, "%s...", i ? ", " : "");
+		fprint(module, "%s...", *named ? ", " : "");
 	fprint(module, ")");
 	if (restype)
 		fprint(module, " -> %s", restype);
@@ -1638,12 +1789,36 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	if (rettype)
 		pinst("%%retval = llvm.alloca %s x %s : (i32) -> !llvm.ptr",
 			iconst(1, "i32"), rettype);
+	r.gp = 6;
+	r.fp = 8;
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
-		p->x.name = localname(p);
-		emitalloca(p);
-		pinst("llvm.store %%a%d, %s : %s, !llvm.ptr", i, p->x.name,
-			typestr(p->type));
+		if (i == 0 && nres > 0) {	/* the result goes in %retval */
+			p->x.name = localname(p);
+			emitalloca(p);
+			pinst("llvm.store %%retval, %s : !llvm.ptr, !llvm.ptr", p->x.name);
+		} else if (!isstruct(p->type)) {
+			p->x.name = localname(p);
+			emitalloca(p);
+			pinst("llvm.store %%a%d, %s : %s, !llvm.ptr", i, p->x.name,
+				typestr(p->type));
+			scalarreg(typestr(p->type), &r);
+		} else if ((n = structparts(p->type, &r, part)) == 0)
+			p->x.name = stringf("%%a%d", i);	/* byval */
+		else {	/* in registers: store them */
+			p->x.name = localname(p);
+			emitalloca(p);
+			for (j = 0; j < n; j++) {
+				char *addr = p->x.name;
+				if (j > 0) {
+					addr = newreg();
+					pinst("%s = llvm.getelementptr %s[%d] : (!llvm.ptr) -> !llvm.ptr, i8",
+						addr, p->x.name, 8*j);
+				}
+				pinst("llvm.store %%a%d.%d, %s {alignment = %d : i64} : %s, !llvm.ptr",
+					i, j, addr, p->type->align, part[j]);
+			}
+		}
 		if (q->sclass == p->sclass && q->type == p->type)
 			q->x.name = p->x.name;
 		else {	/* the front end assigns caller to callee */
@@ -1714,28 +1889,26 @@ static void I(global)(Symbol p) {
    parameters if it has no prototype; the stdarg builtins are not
    functions */
 static void I(import)(Symbol p) {
-	struct fninfo *f;
-	Type *proto;
-	int i;
+	Type fty = p->type, *proto = fty->u.f.proto;
+	char *plain, *typed, *named;
+	int n = 0;
 
-	if (isfunc(p->type)) {
-		if (strncmp(p->name, "__builtin_va_", 13) == 0 || hasstruct(p->type))
+	if (isfunc(fty)) {
+		if (strncmp(p->name, "__builtin_va_", 13) == 0)
 			return;
 		if (fnref(p) == FUNCFUNC) {
-			f = fninfo(p);
-			fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->params);
+			struct fninfo *f = fninfo(p);
+			fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->typed);
 			if (f->result)
 				fprint(module, " -> %s", f->result);
 		} else {
-			fprint(module, "llvm.func @\"%s\"(", gname(p));
-			proto = p->type->u.f.proto;
-			if (proto && !p->type->u.f.oldstyle) {
-				for (i = 0; proto[i] && proto[i] != voidtype; i++)
-					fprint(module, "%s%s", i ? ", " : "", argtypestr(proto[i]));
-				if (variadic(p->type))
-					fprint(module, ", ...");
-			} else
-				fprint(module, "...");
+			if (proto && !fty->u.f.oldstyle)
+				for ( ; proto[n] && proto[n] != voidtype; n++)
+					;
+			sigparams(freturn(fty), proto, n, 0, &plain, &typed, &named);
+			fprint(module, "llvm.func @\"%s\"(%s", gname(p), typed);
+			if (proto == NULL || fty->u.f.oldstyle || variadic(fty))
+				fprint(module, "%s...", *typed ? ", " : "");
 			fprint(module, ")");
 			if (restypestr(p->type))
 				fprint(module, " -> %s", restypestr(p->type));
