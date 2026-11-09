@@ -4,7 +4,8 @@
 # usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
 #
 # target is that of the lcc in builddir: x86_64-linux (the default), or
-# aarch64-linux, whose programs run with qemu-aarch64; $TARGET too.
+# aarch64-linux, whose programs run with qemu-aarch64; $TARGET too.  The
+# lcc may be an AArch64 program itself (src/selfhost.sh -x aarch64-linux).
 #
 # suites:
 #   lcc               tst/*.c; input tst/NAME.0, stdout compared with NAME.1bk
@@ -94,6 +95,9 @@ x86_64-linux)
 	RUN= NM=nm ;;
 aarch64-linux)
 	RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu" NM=llvm-nm-18
+	# an lcc built by itself for AArch64 runs with binfmt_misc
+	QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+	export QEMU_LD_PREFIX
 	case "$DRVCC" in
 	clang)	DRVCC="clang --target=aarch64-linux-gnu -fuse-ld=lld" ;;
 	gcc)	DRVCC=aarch64-linux-gnu-gcc ;;

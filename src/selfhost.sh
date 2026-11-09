@@ -1,12 +1,13 @@
 #!/bin/sh
 # selfhost.sh - build lcc with itself and check that it reaches a fixed point
 #
-# usage: src/selfhost.sh [-t llvm|mlir] -b builddir [-o outdir]
+# usage: src/selfhost.sh [-t llvm|mlir] [-x target] -b builddir [-o outdir]
 #
-# builddir has lcc for llvm/x86_64-linux (or mlir/x86_64-linux with -t mlir)
-# built by the host compiler (stage 1), as by make BUILDDIR=builddir
-# HOSTFILE=etc/llvm-x86_64-linux.c all (etc/mlir-x86_64-linux.c) with
-# include/llvm/x86_64-linux/*.h in builddir/include.  Stage 2 is this
+# builddir has lcc for llvm/TARGET (or mlir/TARGET with -t mlir) built by
+# the host compiler (stage 1), as by make BUILDDIR=builddir
+# HOSTFILE=etc/llvm-TARGET.c all (etc/mlir-TARGET.c) with
+# include/llvm/TARGET/*.h in builddir/include; TARGET is x86_64-linux, or
+# aarch64-linux, whose stage 1 is a cross compiler.  Stage 2 is this
 # repository built by the stage 1 lcc in outdir/2, and stage 3 is built by
 # the stage 2 lcc in outdir/3; outdir is builddir/selfhost by default.
 #
@@ -20,16 +21,24 @@
 #
 # The exit status is 0 only if stages 2 and 3 agree.  To run the tests with
 # stage 2, pass outdir/2 to run-llvm.sh -b.
+#
+# For aarch64-linux, stages 2 and 3 are AArch64 programs, which run with
+# qemu-aarch64 through binfmt_misc (the build runs their lburg, and stage
+# 3 is built by stage 2); QEMU_LD_PREFIX gives qemu the target's libraries.
+# The long double of stage 2 is IEEE quad, so stages 1 and 2 may differ
+# where constants of type double are folded.
 
 cd `dirname $0`/.. || exit 1
 
 B=
 O=
 TGT=llvm
+X=x86_64-linux
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-b)	B=$2; shift 2 ;;
 	-t)	TGT=$2; shift 2 ;;
+	-x)	X=$2; shift 2 ;;
 	-o)	O=$2; shift 2 ;;
 	*)	sed -n '2,/^$/s/^# \{0,1\}//p' $0 1>&2; exit 2 ;;
 	esac
@@ -43,17 +52,25 @@ O=${O:-$B/selfhost}
 mkdir -p $O || exit 1
 O=`cd $O && pwd`
 case $TGT in
-llvm)	HOSTFILE=etc/llvm-x86_64-linux.c; SUF=ll ;;
-mlir)	HOSTFILE=etc/mlir-x86_64-linux.c; SUF=mlir ;;
+llvm)	SUF=ll ;;
+mlir)	SUF=mlir ;;
 *)	echo "$0: unknown target $TGT" 1>&2; exit 2 ;;
 esac
+case $X in
+x86_64-linux) ;;
+aarch64-linux)
+	QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+	export QEMU_LD_PREFIX ;;
+*)	echo "$0: unknown target $X" 1>&2; exit 2 ;;
+esac
+HOSTFILE=etc/$TGT-$X.c
 
 # build stage $1 with the lcc in $2
 stage() {
 	D=$O/$1
 	rm -rf $D
 	mkdir -p $D/include || exit 1
-	cp include/llvm/x86_64-linux/*.h $D/include/ || exit 1
+	cp include/llvm/$X/*.h $D/include/ || exit 1
 	echo "stage $1: building with $2/lcc"
 	if ! make BUILDDIR=$D HOSTFILE=$HOSTFILE \
 	    CC="$2/lcc -Wo-lccdir=$2" CFLAGS= LDFLAGS= all >$D/make.log 2>&1; then
