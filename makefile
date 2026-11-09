@@ -64,6 +64,7 @@ RCCOBJS=$Balloc$O \
 	$Bx86$O \
 	$Bx86linux$O \
 	$Bllvm$O \
+	$Babi$O \
 	$Bsysv$O \
 	$Bmlir$O
 
@@ -99,6 +100,7 @@ $Bstmt$O:	src/stmt.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/stmt.c
 $Bstring$O:	src/string.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/string.c
 $Bsym$O:	src/sym.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sym.c
 $Bllvm$O:	src/llvm.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/llvm.c
+$Babi$O:	src/abi.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/abi.c
 $Bsysv$O:	src/sysv.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sysv.c
 $Bmlir$O:	src/mlir.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/mlir.c
 $Bsymbolic$O:	src/symbolic.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/symbolic.c
@@ -265,6 +267,7 @@ RCCSRCS=src/alloc.c \
 	src/gen.c \
 	src/stab.c \
 	src/llvm.c \
+	src/abi.c \
 	src/sysv.c \
 	src/mlir.c \
 	$Bdagcheck.c \

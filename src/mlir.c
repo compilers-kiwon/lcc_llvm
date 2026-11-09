@@ -1,5 +1,5 @@
 #include "c.h"
-#include "sysv.h"
+#include "abi.h"
 #include "target.h"
 
 /*
@@ -16,13 +16,13 @@
 #define I(f) mlir_##f
 static char rcsid[] = "$Id$";
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
 extern Interface I(id##IR);
 TARGETS
 #undef xx
 static struct target targets[] = {
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
-	{ &I(id##IR), triple, layout, ldtype, mlirld },
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+	{ &I(id##IR), triple, layout, ldtype, mlirld, abi },
 TARGETS
 #undef xx
 };
@@ -55,12 +55,12 @@ static Item items, *itail;	/* its initial value so far */
  * repeats its type, so structure types are named by aliases.
  */
 enum { Pbytes, Pzero, Paddr, Pgroup };
-struct part {
+struct ipart {
 	int kind;
 	char *type;		/* MLIR type */
 	Item it;		/* first item, unless a group */
 	int n;			/* bytes of a run, parts of a group */
-	struct part *parts;	/* those of a group */
+	struct ipart *parts;	/* those of a group */
 };
 
 /* addresses of globals plus constants, made by address() */
@@ -298,8 +298,8 @@ static void emitrun(Item it, int n) {
 }
 
 /* initparts - the parts of initial value items, *np of them */
-static struct part *initparts(Item items, int *np) {
-	struct part *p;
+static struct ipart *initparts(Item items, int *np) {
+	struct ipart *p;
 	Item it;
 	int k, n = 0;
 
@@ -328,7 +328,7 @@ static struct part *initparts(Item items, int *np) {
 /* aggtype - the type of an aggregate of the n parts p: an array of
    pointers, or else a packed structure, by its alias.  The types of
    its elements are written without the !llvm. of the llvm dialect */
-static char *aggtype(struct part *p, int n) {
+static char *aggtype(struct ipart *p, int n) {
 	char *buf, *s, *t;
 	int i, len = sizeof "!llvm.struct<packed ()>";
 
@@ -352,8 +352,8 @@ static char *aggtype(struct part *p, int n) {
 
 /* group - the n parts p, n > 1, as one part: an aggregate of them, or
    of groups of 256 of them, recursively, if there are more */
-static struct part *group(struct part *p, int n) {
-	struct part *q;
+static struct ipart *group(struct ipart *p, int n) {
+	struct ipart *q;
 	int i, m;
 
 	do {
@@ -421,7 +421,7 @@ static char *ptrval(void *p) {
 }
 
 /* partval - emit the value of part p, return it */
-static char *partval(struct part *p) {
+static char *partval(struct ipart *p) {
 	char *v = NULL, *e, *w;
 	int i;
 
@@ -465,7 +465,7 @@ static char *partval(struct part *p) {
  */
 static void emitglobal(Symbol p, Item items) {
 	Item it = items;
-	struct part *parts = NULL;
+	struct ipart *parts = NULL;
 	char *ty, *v;
 	int n, align = p->type->align;
 
@@ -959,11 +959,11 @@ static char *mlirpart(char *t) {
 
 /* scalarreg - take a register for a scalar argument of MLIR type t */
 static void scalarreg(char *t, struct regs *r) {
-	sysv_scalarreg(strcmp(t, "f64") == 0 ? "double" : strcmp(t, "f32") == 0
+	(*tg->abi->scalar)(strcmp(t, "f64") == 0 ? "double" : strcmp(t, "f32") == 0
 		? "float" : strcmp(t, tg->mlirld) == 0 ? tg->ldtype : t, r);
 }
 
-/* structparts - sysv_structparts, with MLIR types */
+/* structparts - sysv_structparts, with MLIR types, for the SysV va_arg */
 static int structparts(Type ty, struct regs *r, char *part[]) {
 	int i, n = sysv_structparts(ty, r, part);
 
@@ -972,13 +972,30 @@ static int structparts(Type ty, struct regs *r, char *part[]) {
 	return n;
 }
 
-/* retparts - sysv_retparts, with MLIR types */
-static int retparts(Type ty, char *part[]) {
-	int i, n = sysv_retparts(ty, part);
+/* parttype - the MLIR type of part p */
+static char *parttype(struct part *p) {
+	char *t;
+	int i;
 
-	for (i = 0; i < n; i++)
-		part[i] = mlirpart(part[i]);
-	return n;
+	if (!abi_isagg(p))
+		return mlirpart(p->e[0].type);
+	if (p->type[0] == '[')
+		return stringf("!llvm.array<%d x %s>", p->n, mlirpart(p->e[0].type));
+	t = "!llvm.struct<(";
+	for (i = 0; i < p->n; i++)
+		t = cat(t, i ? ", " : "", mlirpart(p->e[i].type), NULL);
+	return cat(t, ")>", NULL);
+}
+
+/* partattr - the attributes of part p, or NULL */
+static char *partattr(struct part *p) {
+	return p->alignstack
+		? stringf("{llvm.alignstack = %d : i64}", p->alignstack) : NULL;
+}
+
+/* elemalign - the alignment of offset off in an object aligned to align */
+static int elemalign(int off, int align) {
+	return off > 0 && (off & -off) < align ? off & -off : align;
 }
 
 /* byvalstr - attributes of a structure argument ty passed in memory */
@@ -998,14 +1015,10 @@ static char *sretstr(Type ty) {
    in registers is their type, and one in memory has none */
 static char *restypestr(Type fty) {
 	Type rty = unqual(freturn(fty));
-	char *part[2];
+	struct part part;
 
 	if (isstruct(rty))
-		switch (retparts(rty, part)) {
-		case 0: return NULL;
-		case 1: return part[0];
-		default: return stringf("!llvm.struct<(%s, %s)>", part[0], part[1]);
-		}
+		return (*tg->abi->ret)(rty, &part) ? parttype(&part) : NULL;
 	return rty->op == VOID ? NULL : typestr(rty);
 }
 
@@ -1149,28 +1162,31 @@ static void addparam(char **plain, char **typed, char **named, char *ty,
 static void sigparams(Type rty, Type ty[], int n, int base, char **plain,
 	char **typed, char **named) {
 	struct regs r;
-	char *part[2], *t;
+	struct part rpart, *part;
+	char *t;
 	int i, j, k;
 
 	*plain = *typed = *named = "";
-	r.gp = 6;
-	r.fp = 8;
-	if (isstruct(rty) && retparts(rty, part) == 0) {
+	(*tg->abi->init)(&r);
+	if (isstruct(rty) && !(*tg->abi->ret)(rty, &rpart)) {
 		addparam(plain, typed, named, "!llvm.ptr", sretstr(rty), "%a0");
-		r.gp--;
+		(*tg->abi->scalar)("ptr", &r);
 	}
 	for (i = 0; i < n; i++)
 		if (!isstruct(ty[i])) {
 			t = argtypestr(ty[i]);
 			addparam(plain, typed, named, t, NULL, stringf("%%a%d", base + i));
 			scalarreg(t, &r);
-		} else if ((k = structparts(ty[i], &r, part)) == 0)
+		} else if ((k = (*tg->abi->arg)(ty[i], &r, &part)) == ABYVAL)
 			addparam(plain, typed, named, "!llvm.ptr", byvalstr(ty[i]),
+				stringf("%%a%d", base + i));
+		else if (k == ABYREF)
+			addparam(plain, typed, named, "!llvm.ptr", NULL,
 				stringf("%%a%d", base + i));
 		else
 			for (j = 0; j < k; j++)
-				addparam(plain, typed, named, part[j], NULL,
-					stringf("%%a%d.%d", base + i, j));
+				addparam(plain, typed, named, parttype(&part[j]),
+					partattr(&part[j]), stringf("%%a%d.%d", base + i, j));
 }
 
 /*
@@ -1211,6 +1227,69 @@ static char *gepconst(char *p, long n) {
 
 	inst("%s = llvm.getelementptr %s[%D] : (!llvm.ptr) -> !llvm.ptr, i8", v, p, n);
 	return v;
+}
+
+/* loadpart - load part p of the structure at addr, aligned to align */
+static char *loadpart(struct part *p, char *addr, int align) {
+	char *v = NULL, *t = parttype(p);
+	int i;
+
+	for (i = 0; i < p->n; i++) {
+		struct elem *e = &p->e[i];
+		char *x = newreg(), *m = abi_memtype(e), *a;
+		a = e->off > 0 ? gepconst(addr, e->off) : addr;
+		inst("%s = llvm.load %s {alignment = %d : i64} : !llvm.ptr -> %s",
+			x, a, elemalign(e->off, align), mlirpart(m));
+		if (m != e->type) {
+			char *y = newreg();
+			inst("%s = arith.extui %s : %s to %s", y, x, m, e->type);
+			x = y;
+		}
+		if (!abi_isagg(p))
+			return x;
+		if (v == NULL) {
+			v = newreg();
+			inst("%s = llvm.mlir.poison : %s", v, t);
+		}
+		{
+			char *w = newreg();
+			inst("%s = llvm.insertvalue %s, %s[%d] : %s", w, x, v, i, t);
+			v = w;
+		}
+	}
+	return v;
+}
+
+/*
+ * storepart - store v, the value of part p, in the structure at addr;
+ * with pro, in the prologue
+ */
+static void storepart(struct part *p, char *v, char *addr, int align, int pro) {
+	void (*emit)(const char *, ...) = pro ? pinst : inst;
+	char *t = parttype(p);
+	int i;
+
+	for (i = 0; i < p->n; i++) {
+		struct elem *e = &p->e[i];
+		char *x = v, *a = addr, *m = abi_memtype(e);
+		if (abi_isagg(p)) {
+			x = newreg();
+			(*emit)("%s = llvm.extractvalue %s[%d] : %s", x, v, i, t);
+		}
+		if (e->off > 0 && pro) {
+			a = newreg();
+			pinst("%s = llvm.getelementptr %s[%d] : (!llvm.ptr) -> !llvm.ptr, i8",
+				a, addr, e->off);
+		} else if (e->off > 0)
+			a = gepconst(addr, e->off);
+		if (m != e->type) {
+			char *y = newreg();
+			(*emit)("%s = arith.trunci %s : %s to %s", y, x, e->type, m);
+			x = y;
+		}
+		(*emit)("llvm.store %s, %s {alignment = %d : i64} : %s, !llvm.ptr",
+			x, a, elemalign(e->off, align), mlirpart(m));
+	}
 }
 
 /* ssepart - is part t passed in an SSE register? */
@@ -1385,7 +1464,7 @@ static char *emitbuiltin(Node p, int b) {
 	}
 	assert(b == VAARG);
 	ty = unqual(freturn(p->syms[0]->type)->type);
-	if (sysv_needsslot(ty)) {
+	if ((*tg->abi->needsslot)(ty)) {
 		slot = stringf("%%va%d", ++nlocal);
 		pinst("%s = llvm.alloca %s x %s {alignment = %d : i64} : (i32) -> !llvm.ptr",
 			slot, iconst(1, "i32"), typestr(ty), ty->align);
@@ -1417,9 +1496,10 @@ static char *emitcall(Node p) {
 	Symbol f = specific(k->op) == ADDRG+P ? k->syms[0] : NULL;
 	struct arg *a, *b, *list = NULL, **tail = &list, *res = NULL;
 	struct regs r;
-	char *rt = optype(p->op) == V ? NULL : optypestr(p->op), *rpart[2], *part[2];
+	char *rt = optype(p->op) == V ? NULL : optypestr(p->op);
+	struct part rpart, *part;
 	char *plain = "", *typed = "", *attrs = "", *fixed = "", *operands = "";
-	char *v = NULL, *w, *addr;
+	char *v = NULL, *w;
 	int i, j, n, narrow = 0, hasattr = 0, nres = 0;
 	int nfixed = -1;	/* -1: all arguments are fixed */
 
@@ -1428,7 +1508,7 @@ static char *emitcall(Node p) {
 	if (isstruct(rty)) {	/* args has its address first */
 		assert(args && args->type && strcmp(args->type, "!llvm.ptr") == 0);
 		res = args;
-		if ((nres = retparts(rty, rpart)) > 0) {
+		if ((nres = (*tg->abi->ret)(rty, &rpart)) > 0) {
 			args = args->link;
 			rt = restypestr(fty);
 		} else
@@ -1445,31 +1525,40 @@ static char *emitcall(Node p) {
 		rt = typestr(rty);
 		narrow = 1;
 	}
-	/* pass structures in registers or in memory */
-	r.gp = 6;
-	r.fp = 8;
+	/* pass structures in registers, in memory or by address */
+	(*tg->abi->init)(&r);
 	for (i = 0, a = args; a; i++, a = a->link) {
 		a->fixed = nfixed < 0 || i < nfixed;
 		n = 0;
 		if (a->sty == NULL)
 			scalarreg(a->type, &r);
-		else if ((n = structparts(a->sty, &r, part)) == 0) {
+		else if ((n = (*tg->abi->arg)(a->sty, &r, &part)) == ABYVAL) {
 			a->type = "!llvm.ptr";
 			a->attr = byvalstr(a->sty);
+		} else if (n == ABYREF) {	/* the address of a copy */
+			char *copy = stringf("%%cp%d", ++nlocal), *one, *size, *f;
+			one = iconst(1, "i32");
+			pinst("%s = llvm.alloca %s x %s {alignment = %d : i64} : (i32) -> !llvm.ptr",
+				copy, one, typestr(a->sty), a->sty->align);
+			size = iconst(a->sty->size, "i64");
+			f = boolconst(0);
+			inst("llvm.call_intrinsic \"llvm.memcpy.p0.p0.i64\"(%s, %s, %s, %s) : "
+				"(!llvm.ptr {llvm.align = %d : i64}, !llvm.ptr {llvm.align = %d : i64}, i64, i1) -> ()",
+				copy, a->val, size, f, a->sty->align, a->sty->align);
+			a->type = "!llvm.ptr";
+			a->val = copy;
 		}
-		if (n == 0) {
+		if (n <= 0) {
 			*tail = a;
 			tail = &a->link;
 			continue;
 		}
 		for (j = 0; j < n; j++) {
 			NEW0(b, FUNC);
-			b->type = part[j];
+			b->type = parttype(&part[j]);
+			b->attr = partattr(&part[j]);
 			b->fixed = a->fixed;
-			b->val = newreg();
-			addr = j > 0 ? gepconst(a->val, 8*j) : a->val;
-			inst("%s = llvm.load %s {alignment = %d : i64} : !llvm.ptr -> %s",
-				b->val, addr, a->sty->align, part[j]);
+			b->val = loadpart(&part[j], a->val, a->sty->align);
 			*tail = b;
 			tail = &b->link;
 		}
@@ -1501,16 +1590,7 @@ static char *emitcall(Node p) {
 			rt ? rt : "void", " (", fixed, *fixed ? ", " : "", "...)>)", NULL),
 			" : !llvm.ptr, (", typed, ") -> ", rt ? rt : "()", NULL));
 	if (nres > 0) {	/* store the registers at the result address */
-		for (i = 0; i < nres; i++) {
-			w = v;
-			if (nres > 1) {
-				w = newreg();
-				inst("%s = llvm.extractvalue %s[%d] : %s", w, v, i, rt);
-			}
-			addr = i > 0 ? gepconst(res->val, 8*i) : res->val;
-			inst("llvm.store %s, %s {alignment = %d : i64} : %s, !llvm.ptr",
-				w, addr, rty->align, rpart[i]);
-		}
+		storepart(&rpart, v, res->val, rty->align, 0);
 		return "";
 	}
 	if (v == NULL)
@@ -1935,13 +2015,14 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	struct fninfo *fi;
 	struct laddr *a;
 	struct regs r;
-	char *v, *w, *plain, *typed, *named, *part[2];
+	struct part rpart, *part;
+	char *v, *w, *plain, *typed, *named;
 
 	flushglobal();
 	rettype = rettypestr(f->type);
 	restype = restypestr(f->type);
 	if (isstruct(rty))
-		nres = retparts(rty, part);
+		nres = (*tg->abi->ret)(rty, &rpart);
 	for (n = 0; caller[n]; n++)
 		;
 	ty = newarray(n + 1, sizeof *ty, FUNC);
@@ -1996,8 +2077,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	if (rettype)
 		pinst("%%retval = llvm.alloca %s x %s : (i32) -> !llvm.ptr",
 			iconst(1, "i32"), rettype);
-	r.gp = 6;
-	r.fp = 8;
+	(*tg->abi->init)(&r);
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
 		if (i == 0 && nres > 0) {	/* the result goes in %retval */
@@ -2010,21 +2090,14 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			pinst("llvm.store %%a%d, %s : %s, !llvm.ptr", i, p->x.name,
 				typestr(p->type));
 			scalarreg(typestr(p->type), &r);
-		} else if ((n = structparts(p->type, &r, part)) == 0)
-			p->x.name = stringf("%%a%d", i);	/* byval */
+		} else if ((n = (*tg->abi->arg)(p->type, &r, &part)) <= 0)
+			p->x.name = stringf("%%a%d", i);	/* byval or a copy */
 		else {	/* in registers: store them */
 			p->x.name = localname(p);
 			emitalloca(p);
-			for (j = 0; j < n; j++) {
-				char *addr = p->x.name;
-				if (j > 0) {
-					addr = newreg();
-					pinst("%s = llvm.getelementptr %s[%d] : (!llvm.ptr) -> !llvm.ptr, i8",
-						addr, p->x.name, 8*j);
-				}
-				pinst("llvm.store %%a%d.%d, %s {alignment = %d : i64} : %s, !llvm.ptr",
-					i, j, addr, p->type->align, part[j]);
-			}
+			for (j = 0; j < n; j++)
+				storepart(&part[j], stringf("%%a%d.%d", i, j), p->x.name,
+					p->type->align, 1);
 		}
 		if (q->sclass == p->sclass && q->type == p->type)
 			q->x.name = p->x.name;
@@ -2120,7 +2193,7 @@ static void I(import)(Symbol p) {
 			if (restypestr(p->type))
 				fprint(module, " -> %s", restypestr(p->type));
 		}
-		if (sysv_returnstwice(p->name))
+		if (abi_returnstwice(p->name))
 			fprint(module, " attributes {passthrough = [\"returns_twice\"]}");
 		fprint(module, "\n");
 		return;
@@ -2186,7 +2259,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
 TARGETIR(id, lsize, ldsize, psize, uchar);
 TARGETS
 #undef xx

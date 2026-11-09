@@ -1,5 +1,5 @@
 #include "c.h"
-#include "sysv.h"
+#include "abi.h"
 #include "target.h"
 
 /*
@@ -15,13 +15,13 @@
 #define I(f) llvm_##f
 static char rcsid[] = "$Id$";
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
 extern Interface I(id##IR);
 TARGETS
 #undef xx
 static struct target targets[] = {
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
-	{ &I(id##IR), triple, layout, ldtype, mlirld },
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+	{ &I(id##IR), triple, layout, ldtype, mlirld, abi },
 TARGETS
 #undef xx
 };
@@ -57,7 +57,8 @@ struct nodeval {
 };
 static struct nodeval *nodevals[NVHASH];
 
-/* va_arg calls of the current function and the places for their values */
+/* va_arg calls of the current function and the places for their values,
+   and the places of the copies of structure arguments passed by address */
 struct vaslot {
 	Node call;
 	char *name;
@@ -79,6 +80,7 @@ struct arg {
 	Type sty;	/* a structure: val is its address, type is NULL */
 	char *attr;	/* attributes, as byval */
 	int fixed;	/* matches a parameter, not ... */
+	Node node;	/* the ARG */
 	struct arg *link;
 };
 static struct arg *args, **argtail = &args;
@@ -211,17 +213,81 @@ static char *sretstr(Type ty) {
 	return stringf("sret([%d x i8]) align %d", ty->size, ty->align);
 }
 
+/* elemalign - the alignment of offset off in an object aligned to align */
+static int elemalign(int off, int align) {
+	return off > 0 && (off & -off) < align ? off & -off : align;
+}
+
+/* loadpart - load part p of the structure at addr, aligned to align */
+static char *loadpart(struct part *p, char *addr, int align) {
+	char *v = "poison";
+	int i;
+
+	for (i = 0; i < p->n; i++) {
+		struct elem *e = &p->e[i];
+		char *x = newreg(), *a = addr, *m = abi_memtype(e);
+		if (e->off > 0) {
+			a = newreg();
+			inst("%s = getelementptr i8, ptr %s, i64 %d", a, addr, e->off);
+		}
+		inst("%s = load %s, ptr %s, align %d", x, m, a, elemalign(e->off, align));
+		if (m != e->type) {
+			char *y = newreg();
+			inst("%s = zext %s %s to %s", y, m, x, e->type);
+			x = y;
+		}
+		if (!abi_isagg(p))
+			return x;
+		{
+			char *w = newreg();
+			inst("%s = insertvalue %s %s, %s %s, %d", w, p->type, v, e->type, x, i);
+			v = w;
+		}
+	}
+	return v;
+}
+
+/* storepart - store v, the value of part p, in the structure at addr */
+static void storepart(struct part *p, char *v, char *addr, int align) {
+	int i;
+
+	for (i = 0; i < p->n; i++) {
+		struct elem *e = &p->e[i];
+		char *x = v, *a = addr, *m = abi_memtype(e);
+		if (abi_isagg(p)) {
+			x = newreg();
+			inst("%s = extractvalue %s %s, %d", x, p->type, v, i);
+		}
+		if (e->off > 0) {
+			a = newreg();
+			inst("%s = getelementptr i8, ptr %s, i64 %d", a, addr, e->off);
+		}
+		if (m != e->type) {
+			char *y = newreg();
+			inst("%s = trunc %s %s to %s", y, e->type, x, m);
+			x = y;
+		}
+		inst("store %s %s, ptr %s, align %d", m, x, a, elemalign(e->off, align));
+	}
+}
+
+/* partattr - the attributes of part p, or NULL */
+static char *partattr(struct part *p) {
+	return p->alignstack ? stringf("alignstack(%d)", p->alignstack) : NULL;
+}
+
+/* partstr - the type and attributes of part p */
+static char *partstr(struct part *p) {
+	return p->alignstack ? stringf("%s %s", p->type, partattr(p)) : p->type;
+}
+
 /* rettypestr - LLVM return type of function type fty */
 static char *rettypestr(Type fty) {
 	Type rty = freturn(fty);
 
 	if (isstruct(rty)) {
-		char *part[2];
-		switch (sysv_retparts(rty, part)) {
-		case 0: return "void";
-		case 1: return part[0];
-		default: return stringf("{ %s, %s }", part[0], part[1]);
-		}
+		struct part part;
+		return (*tg->abi->ret)(rty, &part) ? part.type : "void";
 	}
 	if (isint(rty) || isenum(rty))
 		rty = promote(rty);
@@ -356,24 +422,37 @@ static char *vaslot(Node p) {
 	return NULL;
 }
 
+/* newslot - make an entry block place of type ty for node p */
+static void newslot(Node p, char *name, Type ty) {
+	struct vaslot *s;
+
+	NEW(s, FUNC);
+	s->call = p;
+	s->name = stringf("%%%s%d", name, ++nlocal);
+	s->link = vaslots;
+	vaslots = s;
+	inst("%s = alloca %s, align %d", s->name, typestr(ty), ty->align);
+}
+
 /*
  * allocvaslots - make an entry block place for each va_arg call in dag
- * p that needs one.  The call returns the address of its value.
+ * p that needs one, and for each structure argument passed by the
+ * address of a copy.  The va_arg call returns the address of its value.
  */
 static void allocvaslots(Node p) {
 	Type ty;
+	struct regs r;
+	struct part *part;
 
 	if (p == NULL)
 		return;
 	if (generic(p->op) == CALL && builtin(p) == VAARG && vaslot(p) == NULL
-	&& sysv_needsslot(ty = unqual(freturn(p->syms[0]->type)->type))) {
-		struct vaslot *s;
-		NEW(s, FUNC);
-		s->call = p;
-		s->name = stringf("%%va%d", ++nlocal);
-		s->link = vaslots;
-		vaslots = s;
-		inst("%s = alloca %s, align %d", s->name, typestr(ty), ty->align);
+	&& (*tg->abi->needsslot)(ty = unqual(freturn(p->syms[0]->type)->type)))
+		newslot(p, "va", ty);
+	if (generic(p->op) == ARG && optype(p->op) == B && vaslot(p) == NULL) {
+		(*tg->abi->init)(&r);
+		if ((*tg->abi->arg)(p->syms[0]->type, &r, &part) == ABYREF)
+			newslot(p, "cp", p->syms[0]->type);
 	}
 	allocvaslots(p->kids[0]);
 	allocvaslots(p->kids[1]);
@@ -761,16 +840,16 @@ static char *emitcall(Node p) {
 	char *f = nodeval(p->kids[0]), *v = NULL, *rt = optypestr(p->op);
 	struct arg *a, *list = NULL, **tail = &list, *res = NULL;
 	struct regs r;
-	char *rpart[2];
+	struct part rpart;
 	int i, narrow = 0, nfixed = -1;	/* -1: all arguments are fixed */
-	int nres = 0;	/* registers of a structure result */
+	int nres = 0;	/* 1 if a structure result is in registers */
 
 	if ((i = builtin(p)) != 0)
 		return emitbuiltin(p, i);
 	if (isstruct(rty)) {	/* args has its address first */
 		assert(args && args->type && strcmp(args->type, "ptr") == 0);
 		res = args;
-		if ((nres = sysv_retparts(rty, rpart)) > 0) {
+		if ((nres = (*tg->abi->ret)(rty, &rpart)) > 0) {
 			args = args->link;
 			rt = rettypestr(fty);
 		} else
@@ -789,37 +868,39 @@ static char *emitcall(Node p) {
 		rt = typestr(rty);
 		narrow = 1;
 	}
-	/* pass structures in registers or on the stack */
-	r.gp = 6;
-	r.fp = 8;
+	/* pass structures in registers, on the stack or by address */
+	(*tg->abi->init)(&r);
 	for (i = 0, a = args; a; i++, a = a->link) {
 		struct arg *b;
-		char *part[2];
+		struct part *part;
 		int j, n = 0;
 		a->fixed = nfixed < 0 || i < nfixed;
 		if (a->sty == NULL)
-			sysv_scalarreg(a->type, &r);
-		else if ((n = sysv_structparts(a->sty, &r, part)) == 0) {
+			(*tg->abi->scalar)(a->type, &r);
+		else if ((n = (*tg->abi->arg)(a->sty, &r, &part)) == ABYVAL) {
 			a->type = "ptr";
 			a->attr = byvalstr(a->sty);
+		} else if (n == ABYREF) {
+			char *copy = vaslot(a->node);
+			assert(copy);
+			inst("call void @llvm.memcpy.p0.p0.i64(ptr align %d %s, "
+				"ptr align %d %s, i64 %d, i1 false)", a->sty->align, copy,
+				a->sty->align, a->val, a->sty->size);
+			usedmemcpy = 1;
+			a->type = "ptr";
+			a->val = copy;
 		}
-		if (n == 0) {
+		if (n <= 0) {
 			*tail = a;
 			tail = &a->link;
 			continue;
 		}
 		for (j = 0; j < n; j++) {
-			char *addr = a->val;
 			NEW0(b, FUNC);
-			b->type = part[j];
+			b->type = part[j].type;
+			b->attr = partattr(&part[j]);
 			b->fixed = a->fixed;
-			b->val = newreg();
-			if (j > 0) {
-				addr = newreg();
-				inst("%s = getelementptr i8, ptr %s, i64 %d", addr, a->val, 8*j);
-			}
-			inst("%s = load %s, ptr %s, align %d", b->val, part[j], addr,
-				a->sty->align);
+			b->val = loadpart(&part[j], a->val, a->sty->align);
 			*tail = b;
 			tail = &b->link;
 		}
@@ -841,24 +922,13 @@ static char *emitcall(Node p) {
 			a->attr ? " " : "", a->attr ? a->attr : "", a->val);
 	print(")");
 	if (specific(p->kids[0]->op) == ADDRG+P
-	&& sysv_returnstwice(p->kids[0]->syms[0]->name))
+	&& abi_returnstwice(p->kids[0]->syms[0]->name))
 		print(" returns_twice");
 	print("\n");
 	args = NULL;
 	argtail = &args;
 	if (nres > 0) {	/* store the registers at the result address */
-		for (i = 0; i < nres; i++) {
-			char *part = v, *addr = res->val;
-			if (nres > 1) {
-				part = newreg();
-				inst("%s = extractvalue %s %s, %d", part, rt, v, i);
-			}
-			if (i > 0) {
-				addr = newreg();
-				inst("%s = getelementptr i8, ptr %s, i64 %d", addr, res->val, 8*i);
-			}
-			inst("store %s %s, ptr %s, align %d", rpart[i], part, addr, rty->align);
-		}
+		storepart(&rpart, v, res->val, rty->align);
 		return "";
 	}
 	if (narrow) {
@@ -1007,6 +1077,7 @@ static void emitnode(Node p) {
 			} else
 				a->type = optypestr(p->op);
 			a->val = nodeval(p->kids[0]);
+			a->node = p;
 			*argtail = a;
 			argtail = &a->link;
 		}
@@ -1196,7 +1267,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	Code cp;
 	Node e;
 	struct regs r;
-	char *rpart[2];
+	struct part rpart;
 	int nres, np;
 
 	flushglobal();
@@ -1214,36 +1285,36 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 
 	print("\ndefine %s%s %s(", f->sclass == STATIC ? "internal " : "",
 		rettype, fname);
-	r.gp = 6;
-	r.fp = 8;
-	nres = isstruct(freturn(f->type)) ? sysv_retparts(freturn(f->type), rpart) : 0;
+	(*tg->abi->init)(&r);
+	nres = isstruct(freturn(f->type)) ? (*tg->abi->ret)(freturn(f->type), &rpart) : 0;
 	for (i = nres > 0, np = 0; caller[i]; i++) {
 		Type ty = caller[i]->type;
-		char *part[2];
+		struct part *part;
 		int j, n;
 		print("%s", np++ ? ", " : "");
 		if (i == 0 && isstruct(freturn(f->type))) {	/* the result address */
 			print("ptr %s %%a0", sretstr(freturn(f->type)));
-			r.gp--;
+			(*tg->abi->scalar)("ptr", &r);
 		} else if (!isstruct(ty)) {
 			print("%s %%a%d", typestr(ty), i);
-			sysv_scalarreg(typestr(ty), &r);
-		} else if ((n = sysv_structparts(ty, &r, part)) == 0)
+			(*tg->abi->scalar)(typestr(ty), &r);
+		} else if ((n = (*tg->abi->arg)(ty, &r, &part)) == ABYVAL)
 			print("ptr %s %%a%d", byvalstr(ty), i);
+		else if (n == ABYREF)
+			print("ptr %%a%d", i);
 		else
 			for (j = 0; j < n; j++)
-				print("%s%s %%a%d.%d", j ? ", " : "", part[j], i, j);
+				print("%s%s %%a%d.%d", j ? ", " : "", partstr(&part[j]), i, j);
 	}
 	if (variadic(f->type))
 		print("%s...", np ? ", " : "");
 	print(") {\nentry:\n");
 	if (strcmp(rettype, "void") != 0)
 		inst("%%retval = alloca %s", rettype);
-	r.gp = 6;
-	r.fp = 8;
+	(*tg->abi->init)(&r);
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
-		char *part[2];
+		struct part *part;
 		int j, n;
 		if (i == 0 && nres > 0) {	/* the result goes in %retval */
 			p->x.name = localname(p);
@@ -1253,22 +1324,15 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			p->x.name = localname(p);
 			emitalloca(p);
 			inst("store %s %%a%d, ptr %s", typestr(p->type), i, p->x.name);
-			sysv_scalarreg(typestr(p->type), &r);
-		} else if ((n = sysv_structparts(p->type, &r, part)) == 0)
-			p->x.name = stringf("%%a%d", i);	/* byval */
+			(*tg->abi->scalar)(typestr(p->type), &r);
+		} else if ((n = (*tg->abi->arg)(p->type, &r, &part)) <= 0)
+			p->x.name = stringf("%%a%d", i);	/* byval or a copy */
 		else {	/* in registers: store them */
 			p->x.name = localname(p);
 			emitalloca(p);
-			for (j = 0; j < n; j++) {
-				char *addr = p->x.name;
-				if (j > 0) {
-					addr = newreg();
-					inst("%s = getelementptr i8, ptr %s, i64 %d",
-						addr, p->x.name, 8*j);
-				}
-				inst("store %s %%a%d.%d, ptr %s, align %d", part[j], i, j,
-					addr, p->type->align);
-			}
+			for (j = 0; j < n; j++)
+				storepart(&part[j], stringf("%%a%d.%d", i, j), p->x.name,
+					p->type->align);
 		}
 		if (q->sclass == p->sclass && q->type == p->type)
 			q->x.name = p->x.name;
@@ -1349,31 +1413,32 @@ static void I(import)(Symbol p) {
 	if (isfunc(p->type)) {
 		Type *proto = p->type->u.f.proto;
 		struct regs r;
-		char *part[2];
+		struct part rpart, *part;
 		int i, j, k, n = 0;
 		print("declare %s %s(", rettypestr(p->type), p->x.name);
-		r.gp = 6;
-		r.fp = 8;
-		if (isstruct(freturn(p->type)) && sysv_retparts(freturn(p->type), part) == 0) {
+		(*tg->abi->init)(&r);
+		if (isstruct(freturn(p->type)) && !(*tg->abi->ret)(freturn(p->type), &rpart)) {
 			print("ptr %s", sretstr(freturn(p->type)));	/* the result address */
 			n++;
-			r.gp--;
+			(*tg->abi->scalar)("ptr", &r);
 		}
 		if (proto && !p->type->u.f.oldstyle) {
 			for (i = 0; proto[i] && proto[i] != voidtype; i++)
 				if (!isstruct(proto[i])) {
 					print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
-					sysv_scalarreg(argtypestr(proto[i]), &r);
-				} else if ((k = sysv_structparts(proto[i], &r, part)) == 0)
+					(*tg->abi->scalar)(argtypestr(proto[i]), &r);
+				} else if ((k = (*tg->abi->arg)(proto[i], &r, &part)) == ABYVAL)
 					print("%sptr %s", n++ ? ", " : "", byvalstr(proto[i]));
+				else if (k == ABYREF)
+					print("%sptr", n++ ? ", " : "");
 				else
 					for (j = 0; j < k; j++)
-						print("%s%s", n++ ? ", " : "", part[j]);
+						print("%s%s", n++ ? ", " : "", partstr(&part[j]));
 			if (variadic(p->type))
 				print(", ...");
 		} else
 			print("%s...", n ? ", " : "");
-		print(")%s\n", sysv_returnstwice(p->name) ? " returns_twice" : "");
+		print(")%s\n", abi_returnstwice(p->name) ? " returns_twice" : "");
 	} else
 		print("%s = external global %s\n", p->x.name, typestr(p->type));
 }
@@ -1421,7 +1486,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
 TARGETIR(id, lsize, ldsize, psize, uchar);
 TARGETS
 #undef xx

@@ -1,25 +1,26 @@
 /*
  * The targets of the llvm and mlir back ends.  For each,
  *
- *	xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar)
+ *	xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi)
  *
  * gives the suffix of its Interfaces' names, the LLVM target triple and
  * data layout, the LLVM and MLIR types of long double, the sizes, which
- * are also the alignments, of long, long double and pointers, and
- * whether plain char is unsigned.  The other types are the same on all
+ * are also the alignments, of long, long double and pointers, whether
+ * plain char is unsigned, and the calling convention (abi.h).  The other types are the same on all
  * of them: char 1, short 2, int 4, long long 8, float 4 and double 8
  * bytes, aligned to their sizes.
  */
 #define TARGETS \
 xx(x86_64_linux, "x86_64-pc-linux-gnu", \
 	"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", \
-	"x86_fp80", "f80", 8, 16, 8, 0)
+	"x86_fp80", "f80", 8, 16, 8, 0, &sysvabi)
 
 /* a target, as a back end looks it up from IR */
 struct target {
 	Interface *ir;
 	char *triple, *layout;
 	char *ldtype, *mlirld;
+	struct abi *abi;
 };
 
 /*

@@ -1,5 +1,5 @@
 #include "c.h"
-#include "sysv.h"
+#include "abi.h"
 
 static char rcsid[] = "$Id$";
 
@@ -7,8 +7,7 @@ static char rcsid[] = "$Id$";
  * The SysV x86-64 ABI and data formats that the llvm back end uses and
  * other back ends for the same target can share: the classification of
  * structures for arguments and results, the argument registers taken,
- * the places va_arg needs, functions that return twice, and the bits of
- * an x87 long double.  Register parts are named by their LLVM types:
+ * the places va_arg needs, and the bits of an x87 long double.  Register parts are named by their LLVM types:
  * "float", "double", "iN" and "x86_fp80".
  */
 
@@ -103,8 +102,8 @@ int sysv_ssepart(char *t) {
 	return strcmp(t, "float") == 0 || strcmp(t, "double") == 0;
 }
 
-/* sysv_scalarreg - take a register for a scalar argument of LLVM type t */
-void sysv_scalarreg(char *t, struct regs *r) {
+/* scalarreg - take a register for a scalar argument of LLVM type t */
+static void scalarreg(char *t, struct regs *r) {
 	if (sysv_ssepart(t)) {
 		if (r->fp > 0)
 			r->fp--;
@@ -123,9 +122,9 @@ void sysv_scalarreg(char *t, struct regs *r) {
  * argument; for a result in registers, the back end drops it.
  */
 
-/* sysv_retparts - set part[] to the registers of the structure result ty;
+/* retparts - set part[] to the registers of the structure result ty;
    return how many, or 0 if ty is returned in memory */
-int sysv_retparts(Type ty, char *part[]) {
+static int retparts(Type ty, char *part[]) {
 	struct regs r;
 	int cls[2];
 
@@ -140,28 +139,12 @@ int sysv_retparts(Type ty, char *part[]) {
 }
 
 /*
- * sysv_returnstwice - whether the function named name can return twice, as
- * setjmp does; LLVM must know, since locals may change between the
- * returns.  The names are those that clang knows.
- */
-int sysv_returnstwice(char *name) {
-	static char *names[] = { "setjmp", "_setjmp", "sigsetjmp",
-		"__sigsetjmp", "savectx", "vfork", "getcontext", NULL };
-	int i;
-
-	for (i = 0; names[i]; i++)
-		if (strcmp(name, names[i]) == 0)
-			return 1;
-	return 0;
-}
-
-/*
- * sysv_needsslot - whether a va_arg of type ty needs a place for its value
+ * needsslot - whether a va_arg of type ty needs a place for its value
  * because it is not in the argument area as it is: a float arrives as a
  * double, and a structure in an SSE register and another register is
  * split in the register save area
  */
-int sysv_needsslot(Type ty) {
+static int needsslot(Type ty) {
 	struct regs r;
 	char *part[2];
 
@@ -214,3 +197,42 @@ void sysv_fp80bits(long double d, unsigned *se, unsigned long *hi, unsigned long
 	}
 	*se = sign<<15 | e;
 }
+
+static void initregs(struct regs *r) {
+	r->gp = 6;
+	r->fp = 8;
+}
+
+/* arg - the parts of sysv_structparts, one element each */
+static int arg(Type ty, struct regs *r, struct part **part) {
+	char *t[2];
+	int i, n = sysv_structparts(ty, r, t);
+
+	if (n == 0)
+		return ABYVAL;
+	*part = abi_parts(n);
+	for (i = 0; i < n; i++)
+		abi_elems(&(*part)[i], ty, 8*i, 1, 8, t[i]);
+	return n;
+}
+
+/* ret - the registers of retparts as one part */
+static int ret(Type ty, struct part *part) {
+	char *t[2];
+	int i, n = retparts(ty, t);
+
+	if (n == 0)
+		return 0;
+	part->alignstack = 0;
+	part->n = n;
+	part->e = newarray(n, sizeof *part->e, FUNC);
+	for (i = 0; i < n; i++) {
+		part->e[i].off = 8*i;
+		part->e[i].size = i == n - 1 ? ty->size - 8*i : 8;
+		part->e[i].type = t[i];
+	}
+	part->type = n == 1 ? t[0] : stringf("{ %s, %s }", t[0], t[1]);
+	return 1;
+}
+
+struct abi sysvabi = { initregs, scalarreg, arg, ret, needsslot };
