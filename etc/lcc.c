@@ -71,11 +71,22 @@ char *tempdir = TEMPDIR;	/* directory for temporary files */
 static char *progname;
 static List lccinputs;		/* list of input directories */
 
+/* nelems - the number of elements of the command a before its NULL */
+static int nelems(char *a[]) {
+	int n;
+
+	for (n = 0; a[n]; n++)
+		;
+	return n;
+}
+
 int main(int argc, char *argv[]) {
 	int i, j, nf;
 	
 	progname = argv[0];
-	ac = argc + 50;
+	/* room for the longest command of the host file, and argv */
+	ac = argc + 50 + nelems(cpp) + nelems(include) + nelems(com)
+		+ nelems(as) + nelems(ld);
 	av = alloc(ac*sizeof(char *));
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, interrupt);
