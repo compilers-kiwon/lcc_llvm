@@ -32,6 +32,21 @@ void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t) {
 }
 
 /*
+ * abi_varalign - the alignment of the variable p: that of its type, or
+ * more for a large array (SysV x86-64 aligns those of at least 16
+ * bytes to 16, which code compiled by others relies on).  Generated
+ * ones, as string literals, have just that of their type.
+ */
+int abi_varalign(struct abi *a, Symbol p) {
+	int align = p->type->align;
+
+	if (a->arrayalign > align && isarray(p->type)
+	&& p->type->size >= a->arrayalign && !p->generated)
+		align = a->arrayalign;
+	return align;
+}
+
+/*
  * abi_libvariadic - the number of fixed parameters of the C library's
  * variadic function named name, or -1.  A call to one without a
  * prototype passes the rest as variadic arguments, as clang does,

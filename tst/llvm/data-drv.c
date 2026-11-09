@@ -269,8 +269,8 @@ int main(void) {
 	/* each global, and the statics and the wide string that pointers
 	   point to, on a multiple of the alignment of its C type (as the
 	   compiler of this file has it), where that is more than 1.  The
-	   SysV ABI also aligns global arrays of 16 bytes or more to 16; lcc
-	   does not yet, so that is not checked */
+	   SysV x86-64 ABI also aligns array variables of 16 bytes or more
+	   to 16, which code optimized by clang relies on */
 	AL(vs, short); AL(vus, unsigned short); AL(vi, int); AL(vu, unsigned); AL(vl, long); AL(vul, unsigned long); AL(lim, struct limits);
 	AL(vf, float); AL(negzf, float); AL(vd, double); AL(negz, double); AL(vld, long double); AL(ldmax, long double); AL(ldmin, long double);
 	AL(farr, float); AL(darr, double); AL(ldarr, long double);
@@ -283,6 +283,11 @@ int main(void) {
 	AL(phidden, int *); aligned("the alignment of hidden", phidden, ALIGNOF(int));
 	AL(pszero, int *); aligned("the alignment of szero", pszero, ALIGNOF(int));
 	AL(psci, short *); aligned("the alignment of sci", psci, ALIGNOF(short));
+#ifdef __x86_64__
+#define BIGAL(x) if (sizeof x >= 16) aligned("the alignment of " #x " to 16", x, 16)
+	BIGAL(farr); BIGAL(darr); BIGAL(ldarr); BIGAL(big); BIGAL(w); BIGAL(wbig); BIGAL(wwide);
+	BIGAL(arr); BIGAL(uarr); BIGAL(nest);
+#endif
 	AL(ci, int); AL(nul, char *); AL(one, char *); AL(zero, int); AL(strs, char *); AL(tab, struct ent); AL(ptab, char *);
 	AL(ipt, char *); AL(zi, int); AL(zp, char *); AL(zld, long double); AL(zst, struct S); AL(zu, union us); AL(tab2, struct ent);
 

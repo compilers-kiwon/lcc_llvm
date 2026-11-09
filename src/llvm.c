@@ -41,6 +41,7 @@ typedef struct gdata *Gdata;
 struct gdata {
 	char *name, *linkage, *type;
 	int constant, size, align;
+	Symbol sym;
 	Item items, *tail;
 	Gdata link;
 };
@@ -1329,6 +1330,8 @@ static void emitglobal(Gdata g) {
 static void flushglobal(void) {
 	if (pending == NULL)
 		return;
+	/* an array's size may be known only from its initializer */
+	pending->align = abi_varalign(tg->abi, pending->sym);
 	if (infunc) {
 		*dtail = pending;
 		dtail = &pending->link;
@@ -1571,6 +1574,7 @@ static void I(global)(Symbol p) {
 	pending->type = typestr(p->type);
 	pending->size = p->type->size;
 	pending->align = p->type->align;
+	pending->sym = p;
 	pending->tail = &pending->items;
 }
 

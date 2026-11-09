@@ -52,6 +52,9 @@ struct abi {
 	/* krfixed - a call without a prototype passes its arguments as
 	   fixed ones, not as variadic ones */
 	int krfixed;
+	/* arrayalign - the least alignment of an array variable of at least
+	   so many bytes, or 0 */
+	int arrayalign;
 };
 
 extern struct abi sysvabi, aapcs64abi, riscv64abi;
@@ -70,6 +73,7 @@ extern void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t
 
 extern int abi_returnstwice(char *);
 extern int abi_libvariadic(char *);
+extern int abi_varalign(struct abi *, Symbol);
 extern int aapcs64_hfa(Type, Type *);
 
 extern void abi_fp128bits(Quad, unsigned long [4]);

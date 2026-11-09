@@ -236,4 +236,4 @@ static int ret(Type ty, struct part *part) {
 	return 1;
 }
 
-struct abi sysvabi = { initregs, scalarreg, arg, ret, needsslot };
+struct abi sysvabi = { initregs, scalarreg, arg, ret, needsslot, NULL, 0, 16 };

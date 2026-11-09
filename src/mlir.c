@@ -483,7 +483,7 @@ static void emitglobal(Symbol p, Item items) {
 	Item it = items;
 	struct ipart *parts = NULL;
 	char *ty, *v;
-	int n, align = p->type->align;
+	int n, align = abi_varalign(tg->abi, p);
 
 	fprint(module, "llvm.mlir.global %s%s @\"%s\"(",
 		p->sclass != STATIC ? "external" : p->generated ? "private" : "internal",
