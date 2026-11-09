@@ -8,6 +8,9 @@
 #define arith r_arith
 #define compare r_compare
 #define ldconst r_ldconst
+#define ldfv r_ldfv
+#define ldfold r_ldfold
+#define ldfoldc r_ldfoldc
 #define tolong r_tolong
 #define toulong r_toulong
 #define toint r_toint
@@ -33,6 +36,9 @@
 #undef arith
 #undef compare
 #undef ldconst
+#undef ldfv
+#undef ldfold
+#undef ldfoldc
 #undef tolong
 #undef toulong
 #undef toint
@@ -54,7 +60,9 @@
 #undef layout
 long double arith(int, long double, long double), passld(long double, double, long double, int, long double);
 int compare(long double, long double), fmt(char *, long double), layout(void);
-long double ldconst(int);
+long double ldconst(int), ldfold(int);
+extern long double ldfv[];
+int ldfoldc(void);
 long tolong(long double); unsigned long toulong(long double); int toint(long double); unsigned tounsigned(long double);
 short toshort(long double); signed char tochar(long double); double todouble(long double); float tofloat(long double);
 long double fromlong(long), fromulong(unsigned long), fromint(int), fromunsigned(unsigned), fromdouble(double), fromfloat(float);
@@ -62,6 +70,8 @@ long double global(int), vsum(const char *, ...);
 extern long double ldv[];
 #undef NLD
 #define NLD (sizeof r_ldv / sizeof r_ldv[0])
+#undef NFOLD
+#define NFOLD (sizeof r_ldfv / sizeof r_ldfv[0])
 
 long double ldext(long double a, double b, long double c, int n, long double d) { return a - b * c + n / d; }
 
@@ -83,6 +93,11 @@ int main(void) {
 	CHK(layout(), r_layout(), "%d");
 	for (i = 0; i < NCONST; i++)
 		same("ldconst", ldconst(i), r_ldconst(i));
+	for (i = 0; i < NFOLD; i++) {
+		same("ldfv", ldfv[i], r_ldfv[i]);
+		same("ldfold", ldfold(i), r_ldfold(i));
+	}
+	CHK(ldfoldc(), r_ldfoldc(), "%#x");
 	for (i = 0; i < NLD; i++) {
 		same("global", global(i), r_global(i));
 		CHK(tolong(ldv[i]), r_tolong(ldv[i]), "%ld"); CHK(toulong(ldv[i]), r_toulong(ldv[i]), "%lu");
