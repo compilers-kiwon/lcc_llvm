@@ -31,6 +31,10 @@ double dt_press3(struct i2 a, struct id b, struct f2 c, struct l3 d, struct di e
 double dt_press4(int n, struct d2 a, struct d2 b, struct d2 c, struct d2 d, struct f1 e, float f) {
 	return n + 2 * sum_d2(&a) + 3 * sum_d2(&b) + 5 * sum_d2(&c) + 7 * sum_d2(&d) + 11 * sum_f1(&e) + 13 * f;
 }
+double dt_press5(int n, struct i17 a, int m, struct d9 b, int c) {
+	return n + 2 * sum_i17(&a) + 3 * m + 5 * sum_d9(&b) + 7 * c;
+}
+double lt_press5(int, struct i17, int, struct d9, int);
 double lt_press1(long, long, long, long, long, struct l2, long);
 double lt_press2(double, double, double, double, double, double, double, struct d2, double);
 double lt_press3(struct i2, struct id, struct f2, struct l3, struct di, struct i3, struct l2, struct fi);
@@ -127,6 +131,10 @@ int main(void) {
 			CHK(lt_press3(i2, id, f2, l3, di, i3, l2, fi), w); CHK(lc_press(k, 3), w); CHK(lc_press(k, 13), w);
 			w = dt_press4(k, d2a, d2b, d2c, d2d, f1, k + 0.5f);
 			CHK(lt_press4(k, d2a, d2b, d2c, d2d, f1, k + 0.5f), w); CHK(lc_press(k, 4), w); CHK(lc_press(k, 14), w);
+			{ struct i17 i17; struct d9 d9;
+			  fill_i17(&i17, k); fill_d9(&d9, k);
+			  w = dt_press5(k, i17, k + 1, d9, k + 2);
+			  CHK(lt_press5(k, i17, k + 1, d9, k + 2), w); CHK(lc_press(k, 5), w); CHK(lc_press(k, 15), w); }
 			CHK(lc_var(k), dv(6, i3, f3, di, l3, d2a, l2, k + 0.5));
 			CHK(lc_noproto(k), dt_i3(i3) + 2 * dt_ffi(ffi) + 3 * dt_l3(l3));
 			{ struct l3 c; fill_l3(&c, k + 1);

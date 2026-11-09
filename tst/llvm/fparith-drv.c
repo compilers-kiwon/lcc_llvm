@@ -1,7 +1,10 @@
 /*
  * Driver for fparith.c: compares the bits of each result with clang's
- * result for the same operation, so NaNs, signed zeros, infinities and
- * subnormals must match exactly.  Exits with 0 if every check passes.
+ * result for the same operation, so signed zeros, infinities and
+ * subnormals must match exactly; a NaN must be a NaN, but its sign and
+ * payload are not specified (on ARM, code optimized by LLVM and the
+ * hardware make NaNs of different signs).  Exits with 0 if every check
+ * passes.
  */
 #include <stdio.h>
 #include <string.h>
@@ -12,7 +15,8 @@ double dpoly(double), dsum(double *, int), shared(double, double); float fpoly(f
 extern double g; void acc(double);
 static int bad, n;
 #define CHK(e, w) do { __typeof__(w) x_ = (e), w_ = (w); n++; \
-	if (memcmp(&x_, &w_, sizeof x_) != 0) { bad++; printf("%s: %.17g != %.17g\n", #e, (double)x_, (double)w_); } } while (0)
+	if (memcmp(&x_, &w_, sizeof x_) != 0 && !(x_ != x_ && w_ != w_)) { \
+		bad++; printf("%s: %.17g != %.17g\n", #e, (double)x_, (double)w_); } } while (0)
 int main(void) {
 	double zero = 0.0, inf = 1.0 / zero, nan = zero / zero;
 	double dv[] = { 0.0, -0.0, 1.0, -1.0, 0.1, 3.5, -2.75, 1e300, -1e-300, DBL_MIN / 3, DBL_MAX, 1.0 / 3, 0, 0 };

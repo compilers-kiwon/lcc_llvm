@@ -99,16 +99,23 @@ double lt_press3(struct i2 a, struct id b, struct f2 c, struct l3 d, struct di e
 double lt_press4(int n, struct d2 a, struct d2 b, struct d2 c, struct d2 d, struct f1 e, float f) {
 	return n + 2 * sum_d2(&a) + 3 * sum_d2(&b) + 5 * sum_d2(&c) + 7 * sum_d2(&d) + 11 * sum_f1(&e) + 13 * f;
 }
+/* structures of more than 64 bytes after an int: on ARM, copied to
+   the argument area as aligned (byval) */
+double lt_press5(int n, struct i17 a, int m, struct d9 b, int c) {
+	return n + 2 * sum_i17(&a) + 3 * m + 5 * sum_d9(&b) + 7 * c;
+}
 double dt_press1(long, long, long, long, long, struct l2, long);
 double dt_press2(double, double, double, double, double, double, double, struct d2, double);
 double dt_press3(struct i2, struct id, struct f2, struct l3, struct di, struct i3, struct l2, struct fi);
 double dt_press4(int, struct d2, struct d2, struct d2, struct d2, struct f1, float);
+double dt_press5(int, struct i17, int, struct d9, int);
 double lc_press(int k, int which) {
 	struct l2 l2; struct d2 d2a, d2b, d2c, d2d; struct i2 i2; struct id id; struct f2 f2;
 	struct l3 l3; struct di di; struct i3 i3; struct fi fi; struct f1 f1;
+	struct i17 i17; struct d9 d9;
 	fill_l2(&l2, k); fill_d2(&d2a, k); fill_d2(&d2b, k + 1); fill_d2(&d2c, k + 2); fill_d2(&d2d, k + 3);
 	fill_i2(&i2, k); fill_id(&id, k); fill_f2(&f2, k); fill_l3(&l3, k); fill_di(&di, k);
-	fill_i3(&i3, k); fill_fi(&fi, k); fill_f1(&f1, k);
+	fill_i3(&i3, k); fill_fi(&fi, k); fill_f1(&f1, k); fill_i17(&i17, k); fill_d9(&d9, k);
 	switch (which) {
 	case 1: return dt_press1(k, k + 1, k + 2, k + 3, k + 4, l2, k + 6);
 	case 2: return dt_press2(k, k + 1, k + 2, k + 3, k + 4, k + 5, k + 6, d2a, k + 8);
@@ -118,6 +125,8 @@ double lc_press(int k, int which) {
 	case 12: return lt_press2(k, k + 1, k + 2, k + 3, k + 4, k + 5, k + 6, d2a, k + 8);
 	case 13: return lt_press3(i2, id, f2, l3, di, i3, l2, fi);
 	case 14: return lt_press4(k, d2a, d2b, d2c, d2d, f1, k + 0.5f);
+	case 5: return dt_press5(k, i17, k + 1, d9, k + 2);
+	case 15: return lt_press5(k, i17, k + 1, d9, k + 2);
 	}
 	return 0;
 }

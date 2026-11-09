@@ -9,7 +9,8 @@
 #include "port.h"
 char *fmt1(int, long, double, char *);
 long vs(int, int); double ds(double), dsi(double);
-int useold(int); long usekr(int);
+int useold(int); long usekr(int), usekr2(int), usekr3(int);
+long kr_ext2(double a, double b) { return (long)(a * 100 + b); }
 long vsum(int n, ...) {		/* ints and longs, as told by the count */
 	va_list ap; long s = 0; int i;
 	va_start(ap, n);
@@ -39,6 +40,8 @@ int main(void) {
 		CHK(dsi(d), 36.0 + d, "%g");
 		CHK(useold(i), i * 100 + 7 + i - 1, "%d");
 		CHK(usekr(i), i * 1000L + 10, "%ld");
+		CHK(usekr2(i), i * 10L + (long)(0.75 * i * 4), "%ld");
+		CHK(usekr3(i), (long)(0.75 * i * 100 + (0.75 + i)), "%ld");
 	}
 	printf("%d checks, %d bad\n", n, bad);
 	return bad != 0;

@@ -11,6 +11,7 @@
 long vsum(int n, ...);		/* in vcall-drv.c */
 double dsum(int n, ...);	/* in vcall-drv.c: needs %al to be set */
 long kr_ext();			/* in vcall-drv.c: long kr_ext(int, long, double) */
+long kr_ext2();			/* in vcall-drv.c: long kr_ext2(double, double) */
 
 char buf[200];
 char *fmt1(int i, long l, double d, char *s) {
@@ -25,3 +26,6 @@ int old(a, b) int a; long b; { return a * 100 + b; }
 int useold(int x) { return old(x, 7L) + later(x); }	/* later is implicit */
 int later(int x) { return x - 1; }
 long usekr(int i) { return kr_ext(i, 1000L, 2.5); }
+double krd = 0.75;
+long usekr2(int i) { return kr_ext(i, 10L, krd * i); }	/* not a constant */
+long usekr3(int i) { return kr_ext2(krd * i, krd + i); }	/* in FP registers on ARM */
