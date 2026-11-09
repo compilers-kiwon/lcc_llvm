@@ -1,8 +1,10 @@
 #include "c.h"
 #include "sysv.h"
+#include "target.h"
 
 /*
- * LLVM back end: emits textual LLVM IR (.ll) for llvm/x86_64-linux.
+ * LLVM back end: emits textual LLVM IR (.ll) for the targets in
+ * target.h, as llvm/x86_64-linux.
  *
  * Locals and parameters live in allocas in the entry block; mem2reg
  * turns them into SSA values.  The LLVM value of each dag node is kept
@@ -12,6 +14,18 @@
 
 #define I(f) llvm_##f
 static char rcsid[] = "$Id$";
+
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+extern Interface I(id##IR);
+TARGETS
+#undef xx
+static struct target targets[] = {
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+	{ &I(id##IR), triple, layout, ldtype, mlirld },
+TARGETS
+#undef xx
+};
+static struct target *tg;	/* the target */
 
 /* initialized global data, collected until the global is complete */
 enum { Kconst, Kstring, Kspace, Kaddr };
@@ -127,10 +141,10 @@ static void setval(Node p, char *val) {
 	nodevals[h] = e;
 }
 
-/* flttypestr - LLVM type of a floating type of size bytes; long double
-   is the x87 80-bit type, which takes 16 bytes */
+/* flttypestr - LLVM type of a floating type of size bytes; a long
+   double wider than double has the target's type */
 static char *flttypestr(int size) {
-	return size == 4 ? "float" : size == 8 ? "double" : "x86_fp80";
+	return size == 4 ? "float" : size == 8 ? "double" : tg->ldtype;
 }
 
 /* optypestr - LLVM type of operator op's type suffix */
@@ -1372,13 +1386,15 @@ static void I(local)(Symbol p) {
 
 /* progbeg - beginning of program */
 static void I(progbeg)(int argc, char *argv[]) {
+	for (tg = targets; tg->ir != IR; tg++)
+		assert(tg < &targets[NELEMS(targets)-1]);
 	if (firstfile && *firstfile) {
 		print("source_filename = \"");
 		emitescaped(strlen(firstfile), firstfile);
 		print("\"\n");
 	}
-	print("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n");
-	print("target triple = \"x86_64-pc-linux-gnu\"\n\n");
+	print("target datalayout = \"%s\"\n", tg->layout);
+	print("target triple = \"%s\"\n\n", tg->triple);
 }
 
 /* progend - end of program */
@@ -1405,47 +1421,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-Interface llvmIR = {
-	1, 1, 0,	/* char */
-	2, 2, 0,	/* short */
-	4, 4, 0,	/* int */
-	8, 8, 0,	/* long */
-	8, 8, 0,	/* long long */
-	4, 4, 0,	/* float */
-	8, 8, 0,	/* double */
-	16, 16, 0,	/* long double: x87 80 bits */
-	8, 8, 0,	/* T* */
-	0, 1, 0,	/* struct */
-	1,		/* little_endian */
-	0,		/* mulops_calls */
-	0,		/* wants_callb */
-	1,		/* wants_argb */
-	1,		/* left_to_right */
-	1,		/* wants_dag */
-	0,		/* unsigned_char */
-	I(address),
-	I(blockbeg),
-	I(blockend),
-	I(defaddress),
-	I(defconst),
-	I(defstring),
-	I(defsymbol),
-	I(emit),
-	I(export),
-	I(function),
-	I(gen),
-	I(global),
-	I(import),
-	I(local),
-	I(progbeg),
-	I(progend),
-	I(segment),
-	I(space),
-	I(stabblock),
-	I(stabend),
-	I(stabfend),
-	I(stabinit),
-	I(stabline),
-	I(stabsym),
-	I(stabtype)
-};
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+TARGETIR(id, lsize, ldsize, psize, uchar);
+TARGETS
+#undef xx

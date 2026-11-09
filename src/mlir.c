@@ -1,10 +1,12 @@
 #include "c.h"
 #include "sysv.h"
+#include "target.h"
 
 /*
- * MLIR back end: emits MLIR (.mlir) for mlir/x86_64-linux, which
- * mlir-opt and mlir-translate lower to LLVM IR.  Types and the dags
- * from the front end are those of llvm/x86_64-linux.
+ * MLIR back end: emits MLIR (.mlir) for the targets in target.h, as
+ * mlir/x86_64-linux, which mlir-opt and mlir-translate lower to LLVM
+ * IR.  Types and the dags from the front end are those of the llvm
+ * back end for the same target.
  *
  * The operations of the module are written to a temporary file, which
  * progend copies into the module op.  What must come before the module
@@ -13,6 +15,18 @@
 
 #define I(f) mlir_##f
 static char rcsid[] = "$Id$";
+
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+extern Interface I(id##IR);
+TARGETS
+#undef xx
+static struct target targets[] = {
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+	{ &I(id##IR), triple, layout, ldtype, mlirld },
+TARGETS
+#undef xx
+};
+static struct target *tg;	/* the target */
 
 /* initialized global data, collected until the global is complete */
 enum { Kconst, Kstring, Kspace, Kaddr };
@@ -89,10 +103,10 @@ static char *newval(void) {
 	return stringf("%%v%d", ++nval);
 }
 
-/* flttypestr - MLIR type of a floating type of size bytes; long double
-   is the x87 80-bit type, which takes 16 bytes */
+/* flttypestr - MLIR type of a floating type of size bytes; a long
+   double wider than double has the target's type */
 static char *flttypestr(int size) {
-	return size == 4 ? "f32" : size == 8 ? "f64" : "f80";
+	return size == 4 ? "f32" : size == 8 ? "f64" : tg->mlirld;
 }
 
 /* typestr - MLIR type for objects of type ty */
@@ -940,13 +954,13 @@ static struct fninfo *fninfo(Symbol p) {
 /* mlirpart - the MLIR type of a part that sysv.c names in LLVM's way */
 static char *mlirpart(char *t) {
 	return strcmp(t, "double") == 0 ? "f64" : strcmp(t, "float") == 0 ? "f32"
-		: strcmp(t, "x86_fp80") == 0 ? "f80" : t;
+		: strcmp(t, tg->ldtype) == 0 ? tg->mlirld : t;
 }
 
 /* scalarreg - take a register for a scalar argument of MLIR type t */
 static void scalarreg(char *t, struct regs *r) {
 	sysv_scalarreg(strcmp(t, "f64") == 0 ? "double" : strcmp(t, "f32") == 0
-		? "float" : strcmp(t, "f80") == 0 ? "x86_fp80" : t, r);
+		? "float" : strcmp(t, tg->mlirld) == 0 ? tg->ldtype : t, r);
 }
 
 /* structparts - sysv_structparts, with MLIR types */
@@ -2126,6 +2140,8 @@ static void I(local)(Symbol p) {
 static void I(progbeg)(int argc, char *argv[]) {
 	int i;
 
+	for (tg = targets; tg->ir != IR; tg++)
+		assert(tg < &targets[NELEMS(targets)-1]);
 	for (i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-llvmfunc") == 0)
 			llvmfunc = 1;
@@ -2145,8 +2161,8 @@ static void I(progend)(void) {
 	flushglobal();
 	for (a = aliases; a; a = a->next)
 		print("%s = %s\n", a->name, a->type);
-	print("module attributes {llvm.data_layout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\", "
-		"llvm.target_triple = \"x86_64-pc-linux-gnu\"} {\n");
+	print("module attributes {llvm.data_layout = \"%s\", "
+		"llvm.target_triple = \"%s\"} {\n", tg->layout, tg->triple);
 	rewind(module);
 	while ((n = fread(buf, 1, sizeof buf, module)) > 0)
 		fwrite(buf, 1, n, stdout);
@@ -2170,47 +2186,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-Interface mlirIR = {
-	1, 1, 0,	/* char */
-	2, 2, 0,	/* short */
-	4, 4, 0,	/* int */
-	8, 8, 0,	/* long */
-	8, 8, 0,	/* long long */
-	4, 4, 0,	/* float */
-	8, 8, 0,	/* double */
-	16, 16, 0,	/* long double: x87 80 bits */
-	8, 8, 0,	/* T* */
-	0, 1, 0,	/* struct */
-	1,		/* little_endian */
-	0,		/* mulops_calls */
-	0,		/* wants_callb */
-	1,		/* wants_argb */
-	1,		/* left_to_right */
-	1,		/* wants_dag */
-	0,		/* unsigned_char */
-	I(address),
-	I(blockbeg),
-	I(blockend),
-	I(defaddress),
-	I(defconst),
-	I(defstring),
-	I(defsymbol),
-	I(emit),
-	I(export),
-	I(function),
-	I(gen),
-	I(global),
-	I(import),
-	I(local),
-	I(progbeg),
-	I(progend),
-	I(segment),
-	I(space),
-	I(stabblock),
-	I(stabend),
-	I(stabfend),
-	I(stabinit),
-	I(stabline),
-	I(stabsym),
-	I(stabtype)
-};
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar) \
+TARGETIR(id, lsize, ldsize, psize, uchar);
+TARGETS
+#undef xx
