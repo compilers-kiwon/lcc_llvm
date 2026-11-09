@@ -4,6 +4,7 @@
  */
 #include <stdio.h>
 #include <limits.h>
+#include "port.h"
 int c2i(char), sc2i(signed char), uc2i(unsigned char), s2i(short), us2i(unsigned short);
 char i2c(int); unsigned char i2uc(int); short l2s(long); unsigned short l2us(long);
 long i2l(int); int l2i(long); unsigned long u2ul(unsigned), i2ul(int);
@@ -17,8 +18,8 @@ static int bad, n;
 #define CHK(e, w, fmt) do { n++; if ((e) != (w)) { bad++; printf("%s: " fmt " != " fmt "\n", #e, e, w); } } while (0)
 int main(void) {
 	static long v[] = { 0, 1, -1, 2, 127, 128, -128, -129, 255, 256, 300, -300, 32767, 32768,
-		-32768, 65535, 65536, 0x12345678, INT_MAX, INT_MIN, 0x80000000L, 0xffffffffL,
-		0x123456789L, -0x123456789L, LONG_MAX, LONG_MIN, 0x7fff00ff80L };
+		-32768, 65535, 65536, 0x12345678, INT_MAX, INT_MIN, LV(0x80000000L, 0x7ffffffeL), LV(0xffffffffL, 0x7fff0000L),
+		LV(0x123456789L, 0x1234567L), LV(-0x123456789L, -0x1234567L), LONG_MAX, LONG_MIN, LV(0x7fff00ff80L, 0x7f00ff80L) };
 	int i, k;
 	char buf[2];
 	for (i = 0; i < (int)(sizeof v / sizeof v[0]); i++) {

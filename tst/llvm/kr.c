@@ -9,7 +9,10 @@
  * giving them external linkage makes the link fail.
  *
  * (char *)f converts a function pointer to an object pointer, which
- * gcc and clang accept but -pedantic rejects.
+ * gcc and clang accept but -pedantic rejects.  The constants are even:
+ * on Thumb the low bit of a function address marks Thumb code, and the
+ * linker sets it after adding the constant to an address in data, where
+ * code adds the constant to the marked address.
  */
 int noproto();
 int later1(int);
@@ -20,7 +23,7 @@ static int helper(int x) { return x + 1000; }
 static int counter = 5;
 
 int (*early[])() = { later1, later2, noproto };
-char *fplus[] = { (char *)later1 + 1, (char *)later2 + 1, (char *)helper - 2 };
+char *fplus[] = { (char *)later1 + 2, (char *)later2 + 4, (char *)helper - 2 };
 
 int callnoproto(int x) { return noproto(x, 3); }
 int noproto(a, b) int a, b; { return a*10 + b; }
@@ -75,8 +78,8 @@ static int odd(int n) { return n == 0 ? 0 : even(n - 1); }
 static int even(int n) { return n == 0 ? 1 : odd(n - 1); }
 int iseven(int n) { return even(n); }
 
-char *fplus1(void) { return (char *)later1 + 1; }
-char *fplus2(void) { return (char *)later2 + 1; }
+char *fplus1(void) { return (char *)later1 + 2; }
+char *fplus2(void) { return (char *)later2 + 4; }
 char *fplus3(void) { return (char *)helper - 2; }
 char *fhelper(void) { return (char *)helper; }
 

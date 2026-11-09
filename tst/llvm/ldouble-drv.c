@@ -1,7 +1,7 @@
 /*
  * Driver for ldouble.c: includes ldouble.c again with renamed
- * functions, compiled by clang, and compares the 80 bits of each long
- * double.  Exits with 0 if every check passes.
+ * functions, compiled by clang, and compares the bytes that hold the
+ * value of each long double.  Exits with 0 if every check passes.
  */
 #define ldv r_ldv
 #define lay r_lay
@@ -69,11 +69,11 @@ static int bad, n;
 #define CHK(e, w, f) do { n++; if ((e) != (w)) { bad++; printf("%s: " f " != " f "\n", #e, e, w); } } while (0)
 static void same(const char *what, long double a, long double b) {
 	n++;
-	if (memcmp(&a, &b, 10) != 0) { bad++; printf("%s: %.21Lg != %.21Lg\n", what, a, b); }
+	if (memcmp(&a, &b, LDBYTES) != 0) { bad++; printf("%s: %.21Lg != %.21Lg\n", what, a, b); }
 }
 int main(void) {
-	static long ls[] = { 0, 1, -1, 123456789012345678L, -9223372036854775807L - 1, 9223372036854775807L };
-	static unsigned long us[] = { 0, 1, 0x8000000000000401UL, 0xffffffffffffffffUL, 0x8000000000000000UL };
+	static long ls[] = { 0, 1, -1, LV(123456789012345678L, 1234567890L), LONG_MIN, LONG_MAX };
+	static unsigned long us[] = { 0, 1, LV(0x8000000000000401UL, 0x80000081UL), ULONG_MAX, ULONG_MAX / 2 + 1 };
 	static double ds[] = { 0.1, -2.5, 1e308, 4.9e-324, 0 };
 	static float fs[] = { 0.1f, -3.5f, 3e38f, 1e-45f };
 	char b1[300], b2[300];
@@ -107,8 +107,8 @@ int main(void) {
 	for (i = 0; i < sizeof fs / sizeof fs[0]; i++) same("fromfloat", fromfloat(fs[i]), r_fromfloat(fs[i]));
 #define VS(args) same("vsum", vsum args, r_vsum args)
 	VS(("l", 0.1L));
-	VS(("ildli", 1, 0.1L, 2.5, 1e4000L, 7));
-	VS(("ddddddddddlldl", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 1.0L/3, -0.1L, 0.5, 1e-4000L));
+	VS(("ildli", 1, 0.1L, 2.5, LDV(1e4000L, 1.5e308L), 7));
+	VS(("ddddddddddlldl", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 1.0L/3, -0.1L, 0.5, LDV(1e-4000L, 1e-300L)));
 	VS(("iiiiiiilil", 1, 2, 3, 4, 5, 6, 7, 2.5L, 8, -2.5L));
 	VS(("ilililil", 1, 0.1L, 2, 0.2L, 3, 0.3L, 4, 0.4L));
 	printf("%d checks, %d bad\n", n, bad);

@@ -83,7 +83,7 @@ int main(void) {
 	for (i = 0; i < (int)NLDLIMITS; i++) {
 		long double a = ldlimit(i), b = r_ldlimit(i);
 		n++;
-		if (memcmp(&a, &b, 10) != 0) { bad++; printf("ldlimit(%d): %.21Lg != %.21Lg\n", i, a, b); }
+		if (memcmp(&a, &b, LDBYTES) != 0) { bad++; printf("ldlimit(%d): %.21Lg != %.21Lg\n", i, a, b); }
 	}
 	for (f = 0; f < NMB; f++)
 		CHK(mbs(f), r_mbs(f), "%ld");

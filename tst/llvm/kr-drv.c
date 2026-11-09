@@ -67,10 +67,10 @@ int main(void) {
 	CHK(early[2] == noproto, 1);
 	CHK(ops[0] == add2, 1);
 	CHK(ops[1] == sub2, 1);
-	CHK(fplus[0], (char *)later1 + 1);
-	CHK(fplus[1], (char *)later2 + 1);
-	CHK(fplus1(), (char *)later1 + 1);
-	CHK(fplus2(), (char *)later2 + 1);
+	CHK(fplus[0], (char *)later1 + 2);
+	CHK(fplus[1], (char *)later2 + 4);
+	CHK(fplus1(), (char *)later1 + 2);
+	CHK(fplus2(), (char *)later2 + 4);
 	CHK(fplus3(), fhelper() - 2);
 	CHK(fplus[2], fhelper() - 2);
 	CHK(fhelper() != (char *)helper, 1);

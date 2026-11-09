@@ -5,6 +5,7 @@
  */
 #include <stdio.h>
 #include <limits.h>
+#include "port.h"
 #define DECL(T, s) T add##s(T, T), sub##s(T, T), mul##s(T, T), div##s(T, T), \
 	mod##s(T, T), and##s(T, T), or##s(T, T), xor##s(T, T), neg##s(T), com##s(T);
 DECL(int, _i) DECL(unsigned, _u) DECL(long, _l) DECL(unsigned long, _ul)
@@ -22,8 +23,8 @@ static int bad, n;
 				CHK(div##s(a, b), (T)(a / b), fmt); CHK(mod##s(a, b), (T)(a % b), fmt); } } } }
 #define VI { 0, 1, -1, 2, -2, 3, 7, -7, 100, -100, 12345, -12345, 0x7fff, 0x8000, INT_MAX, INT_MIN, INT_MAX-1, INT_MIN+1 }
 #define VU { 0, 1, 2, 3, 7, 100, 12345, 0x7fffffffu, 0x80000000u, 0xfffffffeu, 0xffffffffu }
-#define VL { 0, 1, -1, 2, -2, 7, -7, 12345, -12345, 0x7fffffffL, 0x80000000L, -0x80000000L, 0x123456789L, -0x123456789L, LONG_MAX, LONG_MIN, LONG_MAX-1 }
-#define VUL { 0, 1, 2, 7, 12345, 0xffffffffUL, 0x100000000UL, 0x123456789abcdefUL, 0x8000000000000000UL, ULONG_MAX, ULONG_MAX-1 }
+#define VL { 0, 1, -1, 2, -2, 7, -7, 12345, -12345, 0x7fffffffL, LV(0x80000000L, 0x7ffffffeL), LV(-0x80000000L, -0x7ffffffeL), LV(0x123456789L, 0x1234567L), LV(-0x123456789L, -0x1234567L), LONG_MAX, LONG_MIN, LONG_MAX-1 }
+#define VUL { 0, 1, 2, 7, 12345, 0xffffffffUL, LV(0x100000000UL, 0xfffeUL), LV(0x123456789abcdefUL, 0x12345678UL), ULONG_MAX / 2 + 1, ULONG_MAX, ULONG_MAX-1 }
 int main(void) {
 	int a, b, gg = 0;
 	RUN(int, _i, "%d", VI, INT_MIN)

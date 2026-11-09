@@ -3,6 +3,7 @@
  * Exits with 0 if every check passes.
  */
 #include <stdio.h>
+#include "port.h"
 struct S { int x; int y[4]; };
 int *add_pi(int *, int), *add_ip(int *, int), *sub_pl(int *, long), *minus3(int *);
 char *add_pu(char *, unsigned); struct S *next(struct S *);
@@ -19,7 +20,7 @@ int main(void) {
 	int *rows[3]; int r0[4] = { 1, 2, 3, 4 }, r1[4] = { 5, 6, 7, 8 }, r2[4] = { 9, 10, 11, 12 };
 	int i, j;
 	for (i = 0; i < 100; i++) a[i] = i * 7 - 300;
-	for (i = 0; i < 50; i++) la[i] = i * 1000000007L;
+	for (i = 0; i < 50; i++) la[i] = i * LV(1000000007L, 10000007L);
 	for (i = 0; i < 10; i++) { s[i].x = i; for (j = 0; j < 4; j++) s[i].y[j] = 10 * i + j; }
 	rows[0] = r0; rows[1] = r1; rows[2] = r2;
 	for (i = -40; i < 40; i++) {
@@ -43,7 +44,7 @@ int main(void) {
 	for (i = 0; i < 100; i++) put(a, i, i * i);
 	for (i = 0; i < 100; i++) CHK(a[i], i * i, "%d");
 	for (i = 0; i < 50; i += 3) inc(la, (long)i);
-	for (i = 0; i < 50; i++) CHK(la[i], i * 1000000007L + (i % 3 == 0), "%ld");
+	for (i = 0; i < 50; i++) CHK(la[i], i * LV(1000000007L, 10000007L) + (i % 3 == 0), "%ld");
 	for (i = 0; i < 12; i++) CHK(getc_(str, i), str[i], "%d");
 	for (i = 0; i < 5; i++) for (j = 0; j < 7; j++) setm(i, j, i * 100 + j);
 	for (i = 0; i < 5; i++) for (j = 0; j < 7; j++) {

@@ -9,6 +9,7 @@
  * switch-drv.c includes this file again, compiled by clang, and
  * compares the results.
  */
+#include "port.h"
 int swglobal;
 
 int dense(int x) {
@@ -54,27 +55,27 @@ int clusters(int x) {
 int sparse(long x) {
 	switch (x) {
 	case 7: return 1; case 1000: return 2; case 123456789L: return 3;
-	case -987654321L: return 4; case 0x7fffffffffffffffL: return 5;
-	case -0x7fffffffffffffffL - 1: return 6;
+	case -987654321L: return 4; case LONG_MAX: return 5;
+	case LONG_MIN: return 6;
 	}
 	return 0;
 }
 int longends(long x) {
 	switch (x) {
-	case 0x7ffffffffffffffbL: return 1; case 0x7ffffffffffffffcL: return 2;
-	case 0x7ffffffffffffffdL: return 3; case 0x7ffffffffffffffeL: return 4;
-	case 0x7fffffffffffffffL: return 5;
-	case -0x7fffffffffffffffL - 1: return 6; case -0x7fffffffffffffffL: return 7;
-	case -0x7ffffffffffffffeL: return 8; case -0x7ffffffffffffffdL: return 9;
+	case LONG_MAX - 4: return 1; case LONG_MAX - 3: return 2;
+	case LONG_MAX - 2: return 3; case LONG_MAX - 1: return 4;
+	case LONG_MAX: return 5;
+	case LONG_MIN: return 6; case LONG_MIN + 1: return 7;
+	case LONG_MIN + 2: return 8; case LONG_MIN + 3: return 9;
 	}
 	return 0;
 }
 int ulongsw(unsigned long x) {
 	switch (x) {
 	case 0: return 1; case 1: return 2; case 2: return 3; case 3: return 4; case 4: return 5;
-	case 0xfffffffffffffffeUL: return 6; case 0xffffffffffffffffUL: return 7;
-	case 0xfffffffffffffffdUL: return 8; case 0xfffffffffffffffcUL: return 9;
-	case 0x8000000000000000UL: return 10;
+	case ULONG_MAX - 1: return 6; case ULONG_MAX: return 7;
+	case ULONG_MAX - 2: return 8; case ULONG_MAX - 3: return 9;
+	case ULONG_MAX / 2 + 1: return 10;
 	}
 	return 0;
 }
@@ -91,8 +92,8 @@ int charsw(char c) {
 	case 'a': case 'e': case 'i': case 'o': case 'u': return 1;
 	case 'b': case 'c': case 'd': case 'f': case 'g': return 2;
 	case '0': case '1': case '2': case '3': case '4': case '5': return 3;
-	case -128: case -127: case -126: case -125: return 4;
-	case 127: case 126: return 5;
+	case CHAR_MIN: case CHAR_MIN + 1: case CHAR_MIN + 2: case CHAR_MIN + 3: return 4;
+	case CHAR_MAX: case CHAR_MAX - 1: return 5;
 	}
 	return 0;
 }

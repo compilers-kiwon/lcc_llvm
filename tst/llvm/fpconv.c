@@ -2,7 +2,7 @@
  * Conversions with floating types: signed integers to and from float
  * and double, unsigned ones (which the front end builds from signed
  * conversions, rounding once), float to double and back, long double
- * (the x87 80-bit type) to and from double and unsigned long, unary
+ * to and from double and unsigned long, unary
  * minus on float (done in double), mixed expressions, and float
  * constants, which are float values when folded too.  Compiled by lcc;
  * fpconv-drv.c compares the bits.

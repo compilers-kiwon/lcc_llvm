@@ -46,7 +46,7 @@ int main(void) {
 	fill(&ba, sizeof ba, 11); fill(&bb, sizeof bb, 12); cpbig(&ba, &bb); SAME(&ba, &bb);
 	fill(&ta, sizeof ta, 13); fill(&tb, sizeof tb, 14); cpbits(&ta, &tb); SAME(&ta, &tb);
 	fill(&ua, sizeof ua, 15); fill(&ub, sizeof ub, 16); cpu(&ua, &ub); SAME(&ua, &ub);
-	CHK((int)sizeof(struct c3), 3, "%d"); CHK((int)sizeof(struct big), 288, "%d");
+	CHK((int)sizeof(struct c3), 3, "%d"); CHK((int)sizeof(struct big), (int)(((sizeof(int) + 37 + sizeof(long) - 1) / sizeof(long) + 30) * sizeof(long)), "%d");
 
 	fill(&oa, sizeof oa, 17); fill(&ob, sizeof ob, 18); oc = oa;
 	cpinner(&oa, &ob);
@@ -71,7 +71,7 @@ int main(void) {
 		CHK(ba.n, bb.n, "%d"); CHK(memcmp(ba.name, bb.name, 36), 0, "%d"); CHK(memcmp(ba.v, bb.v, sizeof ba.v), 0, "%d");
 		bb = rmakebig(i); bc = rmakebig(i + 1);
 		CHK(retarg(i), rsumbig(&bb) + bc.v[3] + bb.name[2], "%ld");
-		CHK(retc3(i, i * 3, i - 7), i * 3 * 100 + (i - 7), "%d");
+		CHK(retc3(i, i * 3, i - 7), (char)(i * 3) * 100 + (char)(i - 7), "%d");
 	}
 	memset(&ma, 0, sizeof ma); ma.c = 12; ma.d = 3.0; ma.l = -7; ma.s = 300;
 	retmix(&mb, &ma);

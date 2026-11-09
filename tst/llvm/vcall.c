@@ -6,6 +6,7 @@
  * checks the results.
  */
 #include <stdio.h>
+#include "port.h"
 
 long vsum(int n, ...);		/* in vcall-drv.c */
 double dsum(int n, ...);	/* in vcall-drv.c: needs %al to be set */
@@ -16,7 +17,7 @@ char *fmt1(int i, long l, double d, char *s) {
 	sprintf(buf, "%d|%ld|%.3f|%s|%c|%5.1e", i, l, d, s, 'x', 2.5);
 	return buf;
 }
-long vs(int a, int b) { return vsum(4, a, (long)b, a, 1000000000000L) + vsum(0); }
+long vs(int a, int b) { return vsum(4, a, (long)b, a, LV(1000000000000L, 1000000000L)) + vsum(0); }
 double ds(double x) { return dsum(3, x, 0.25, 1e10); }
 double dsi(double x) { return dsum(9, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, x); }
 

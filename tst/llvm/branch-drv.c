@@ -4,6 +4,7 @@
  */
 #include <stdio.h>
 #include <limits.h>
+#include "port.h"
 #define DECL(T, s) int eq##s(T, T), ne##s(T, T), lt##s(T, T), le##s(T, T), gt##s(T, T), ge##s(T, T);
 DECL(int, _i) DECL(unsigned, _u) DECL(long, _l) DECL(unsigned long, _ul)
 int lower(char), sclass(signed char), before(char *, char *), isnull(char *);
@@ -19,8 +20,8 @@ static int bad, n;
 		CHK(gt##s(a, b), a > b, "%d"); CHK(ge##s(a, b), a >= b, "%d"); } }
 #define VI { 0, 1, -1, 2, -2, 100, INT_MAX, INT_MIN, INT_MAX-1, INT_MIN+1 }
 #define VU { 0, 1, 2, 100, 0x7fffffffu, 0x80000000u, 0xffffffffu }
-#define VL { 0, 1, -1, 0x7fffffffL, 0x80000000L, -0x80000000L, LONG_MAX, LONG_MIN }
-#define VUL { 0, 1, 0xffffffffUL, 0x100000000UL, 0x8000000000000000UL, ULONG_MAX }
+#define VL { 0, 1, -1, 0x7fffffffL, LV(0x80000000L, 0x7ffffffeL), LV(-0x80000000L, -0x7fffffffL), LONG_MAX, LONG_MIN }
+#define VUL { 0, 1, 0xffffffffUL, LV(0x100000000UL, 0xfffeUL), ULONG_MAX / 2 + 1, ULONG_MAX }
 static long ref_collatz(long n) { long k = 0; do { n = n % 2 == 0 ? n / 2 : 3 * n + 1; k++; } while (n != 1); return k; }
 static int ref_oddsum(int n) { int i, s = 0; for (i = 0; i < n; i++) { if (i % 2 == 0) continue; if (s > 1000) break; s += i; } return s; }
 static int ref_tri(int n) { int i, j, c = 0; for (i = 1; i <= n; i++) for (j = 1; j <= i; j++) { if (i * j > 500) return c; c += (i ^ j) % 3; } return c; }

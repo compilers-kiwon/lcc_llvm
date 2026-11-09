@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include "port.h"
 char *fmt1(int, long, double, char *);
 long vs(int, int); double ds(double), dsi(double);
 int useold(int); long usekr(int);
@@ -30,10 +31,10 @@ int main(void) {
 	char want[200];
 	int i;
 	for (i = -3; i <= 3; i++) {
-		long l = i * 123456789012L; double d = i * 1.25;
+		long l = i * LV(123456789012L, 123456789L); double d = i * 1.25;
 		sprintf(want, "%d|%ld|%.3f|%s|%c|%5.1e", i, l, d, "str", 'x', 2.5);
 		n++; if (strcmp(fmt1(i, l, d, "str"), want) != 0) { bad++; printf("fmt1: %s != %s\n", fmt1(i, l, d, "str"), want); }
-		CHK(vs(i, i * 7), i + (long)(i * 7) + i + 1000000000000L, "%ld");
+		CHK(vs(i, i * 7), i + (long)(i * 7) + i + LV(1000000000000L, 1000000000L), "%ld");
 		CHK(ds(d), d + 0.25 + 1e10, "%g");
 		CHK(dsi(d), 36.0 + d, "%g");
 		CHK(useold(i), i * 100 + 7 + i - 1, "%d");

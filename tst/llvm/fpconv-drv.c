@@ -1,12 +1,14 @@
 /*
  * Driver for fpconv.c: compares the bits of each result with clang's
  * conversion of the same value.  Only values that fit the target type
- * are converted to integers.  Exits with 0 if every check passes.
+ * are converted to integers; the values depend on the width of long.
+ * Exits with 0 if every check passes.
  */
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
 #include <float.h>
+#include "port.h"
 double i2d(int), l2d(long), c2d(char), u2d(unsigned), ul2d(unsigned long);
 float i2f(int), l2f(long), s2f(short), u2f(unsigned), ul2f(unsigned long);
 int d2i(double), f2i(float); long d2l(double), f2l(float);
@@ -18,17 +20,24 @@ double mix(float, double, int, long); float fmix(float, int); long round_down(do
 static int bad, n;
 #define CHK(e, w) do { __typeof__(w) x_ = (e), w_ = (w); n++; \
 	if (memcmp(&x_, &w_, sizeof x_) != 0) { bad++; printf("%s: %.17g != %.17g\n", #e, (double)x_, (double)w_); } } while (0)
-/* the 10 bytes of an x87 long double; the other 6 are padding */
+/* the bytes that hold the value of a long double */
 #define CHKLD(e, w) do { long double x_ = (e), w_ = (w); n++; \
-	if (memcmp(&x_, &w_, 10) != 0) { bad++; printf("%s: %.21Lg != %.21Lg\n", #e, x_, w_); } } while (0)
+	if (memcmp(&x_, &w_, LDBYTES) != 0) { bad++; printf("%s: %.21Lg != %.21Lg\n", #e, x_, w_); } } while (0)
 int main(void) {
 	static long lv[] = { 0, 1, -1, 7, -7, 255, 256, 32767, -32768, 16777216, 16777217, -16777217,
-		INT_MAX, INT_MIN, 0x7ffffffffffffc00L, 9007199254740993L, -9007199254740993L, LONG_MAX, LONG_MIN };
+		INT_MAX, INT_MIN, LV(0x7ffffffffffffc00L, 0x7fffff80L), LV(9007199254740993L, 16777219L),
+		LV(-9007199254740993L, -16777219L), LONG_MAX, LONG_MIN };
 	static unsigned long uv[] = { 0, 1, 255, 0x7fffffffUL, 0x80000000UL, 0x80000001UL, 0xffffffffUL,
+#if LONG64
 		0x100000000UL, 9007199254740993UL, 0x7fffffffffffffffUL, 0x8000000000000000UL,
 		0x8000000000000401UL, 0x8000000000000400UL, 0x8000000000000c00UL, 0xfffffffffffff800UL,
 		0xfffffffffffffbffUL, 0x8000008000000001UL, 0x8000008000000000UL, 0x8000018000000000UL,
-		0x7fffff8000000001UL, 0x1234567890abcdefUL, 0xfedcba9876543211UL, ULONG_MAX };
+		0x7fffff8000000001UL, 0x1234567890abcdefUL, 0xfedcba9876543211UL,
+#else
+		16777219UL, 0x80000081UL, 0x80000080UL, 0x80000180UL, 0xffffff80UL, 0xffffff7fUL,
+		0x80800001UL, 0x80800000UL, 0x81800000UL, 0x7fffff81UL, 0x12345678UL, 0xfedcba99UL,
+#endif
+		ULONG_MAX };
 	static double dv[] = { 0.0, -0.0, 0.4, 0.5, 0.6, -0.5, -1.5, 2.5, 99.99, -99.99, 1e9, -2e9,
 		2147483647.0, -2147483648.0, 4294967295.0, 3e18, -9.2e18, 9.2e18, 1.8e19, 1e-310, 1e300 };
 	int i, k;
@@ -49,11 +58,13 @@ int main(void) {
 		double x = dv[i]; float f = (float)x;
 		if (x > INT_MIN - 1.0 && x < INT_MAX + 1.0) { CHK(d2i(x), (int)x); }
 		if (f > (float)INT_MIN - 1.0f && f < (float)INT_MAX) { CHK(f2i(f), (int)f); }
-		if (x > -9.22e18 && x < 9.22e18) { CHK(d2l(x), (long)x); CHK(f2l(f), (long)f); CHK(round_down(x), x < 0 ? (long)(x - 0.5) : (long)(x + 0.5)); }
+		if (x > LONG_MIN - 1.0 && x < LONG_MAX + 1.0) { CHK(d2l(x), (long)x); CHK(round_down(x), x < 0 ? (long)(x - 0.5) : (long)(x + 0.5)); }
+		if (f > LONG_MIN - 1.0 && f < LONG_MAX + 1.0) { CHK(f2l(f), (long)f); }
 		if (x > -1.0 && x < UINT_MAX + 1.0) { CHK(d2u(x), (unsigned)x); }
 		if (f > -1.0f && f < 4294967296.0f) { CHK(f2u(f), (unsigned)f); }
-		if (x > -1.0 && x < 1.8446744073709552e19) { CHK(d2ul(x), (unsigned long)x); CHK(f2ul(f), (unsigned long)f); }
-		if (x > -128.0 && x < 128.0) { CHK(d2c(x), (char)x); }
+		if (x > -1.0 && x < ULONG_MAX + 1.0) { CHK(d2ul(x), (unsigned long)x); }
+		if (f > -1.0 && f < ULONG_MAX + 1.0) { CHK(f2ul(f), (unsigned long)f); }
+		if (x > CHAR_MIN - 1.0 && x < CHAR_MAX + 1.0) { CHK(d2c(x), (char)x); }
 		CHK(f2d(f), (double)f); CHK(d2f(x), (float)x); CHK(fneg(f), -f);
 		CHK(viald(x), x); CHK(viald2(x), x * 2);
 		CHKLD(d2ld(x), (long double)x); CHK(ld2d((long double)x * 0.1L), (double)((long double)x * 0.1L));

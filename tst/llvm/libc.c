@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "port.h"
 
 int ctypes(int c) {
 	assert(c >= EOF && c <= UCHAR_MAX);
@@ -139,7 +140,7 @@ long sorts(int which) {
 		for (i = 0; i < 6; i++) s = s * 10 + w[i][0] - 'a';
 		return s;
 	case 3: d = div(-17, 5); return d.quot * 100 + d.rem + abs(-9) * 1000;
-	case 4: ld = ldiv(123456789012L, -1000L); return ld.quot * 10000 + ld.rem + labs(-3L);
+	case 4: ld = ldiv(LV(123456789012L, 123456789L), -1000L); return ld.quot * 10000 + ld.rem + labs(-3L);
 	case 5: return rand();
 	}
 	return 0;
@@ -218,7 +219,7 @@ long stdios(int which, char *buf) {
 	switch (which) {
 	case 0:
 		return sprintf(buf, "%d|%5.2f|%-6s|%x|%o|%e|%c|%%|%ld|%lu|%+d|%05d|%.3s|%p",
-			-42, 3.14159, "ab", 255U, 8U, 12345.678, 'q', -123456789012L, 4000000000UL, 7, -3, "abcdef", (void *)0);
+			-42, 3.14159, "ab", 255U, 8U, 12345.678, 'q', LV(-123456789012L, -1234567890L), 4000000000UL, 7, -3, "abcdef", (void *)0);
 	case 1:
 		n = sscanf("  17 -2.5e1 word 0x1f rest", "%d %lf %s %i", &i, &d, line, &c);
 		return n * 1000000 + i * 1000 + (long)d * 10 + strlen(line) + c * 100000L;

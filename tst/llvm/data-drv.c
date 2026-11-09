@@ -1,7 +1,7 @@
 /*
  * Driver for data.c: includes data.c again with renamed globals,
  * compiled by clang, and compares the bytes of each global, padding
- * too; long doubles are compared in their 80 bits, pointers as offsets
+ * too; long doubles are compared in the bytes that hold their value, pointers as offsets
  * from their objects.  Then checks the alignment of each global and
  * that variables of each kind are writable.  Exits with 0 if every
  * check passes.
@@ -206,8 +206,11 @@ static void upto(const char *what, int k, int len) {
 }
 
 #define SAME(x) same(#x, &x, &r_##x, sizeof x)
-#define LD(x) same(#x, &x, &r_##x, 10)	/* the 80 bits of a long double */
-#define AL(x, a) aligned("the alignment of " #x, &x, a)
+#define LD(x) same(#x, &x, &r_##x, LDBYTES)	/* the value bytes of a long double */
+/* the alignment of the type T, and AL(x, T): check that x is on a
+   multiple of it; for an array, T is its element type */
+#define ALIGNOF(T) ((int)offsetof(struct { char c_; T x_; }, x_))
+#define AL(x, T) aligned("the alignment of " #x, &x, ALIGNOF(T))
 
 int main(void) {
 	int k;
@@ -217,14 +220,14 @@ int main(void) {
 	SAME(vf); SAME(negzf); SAME(vd); SAME(negz); LD(vld); LD(ldmax); LD(ldmin);
 	SAME(farr); SAME(darr);
 	for (k = 0; k < 3; k++)
-		same("ldarr", &ldarr[k], &r_ldarr[k], 10);
+		same("ldarr", &ldarr[k], &r_ldarr[k], LDBYTES);
 	SAME(str); SAME(big); SAME(exact); SAME(chars);
 	SAME(w); SAME(wbig); SAME(wexact); SAME(wwide);
 	same("pw", pw, r_pw, sizeof L"xyz");
 	SAME(arr); SAME(sarr);
-	/* all of st but its pointer and the 6 bytes after the 80 bits of
-	   st.ld */
-	part("st", &st, &r_st, 0, offsetof(struct S, ld) + 10);
+	/* all of st but its pointer and the padding after the value bytes
+	   of st.ld */
+	part("st", &st, &r_st, 0, offsetof(struct S, ld) + LDBYTES);
 	part("st", &st, &r_st, offsetof(struct S, s), offsetof(struct S, p));
 	part("st", &st, &r_st, offsetof(struct S, p) + sizeof st.p, sizeof st);
 	check("st.p", st.p == str + 2);
@@ -264,23 +267,24 @@ int main(void) {
 	upto("ptab", k, 600);
 
 	/* each global, and the statics and the wide string that pointers
-	   point to, on a multiple of the alignment of its C type, where that
-	   is more than 1.  The SysV ABI also aligns global arrays of 16
-	   bytes or more to 16; lcc does not yet, so that is not checked */
-	AL(vs, 2); AL(vus, 2); AL(vi, 4); AL(vu, 4); AL(vl, 8); AL(vul, 8); AL(lim, 8);
-	AL(vf, 4); AL(negzf, 4); AL(vd, 8); AL(negz, 8); AL(vld, 16); AL(ldmax, 16); AL(ldmin, 16);
-	AL(farr, 4); AL(darr, 8); AL(ldarr, 16);
-	AL(w, 4); AL(wbig, 4); AL(wexact, 4); AL(wwide, 4);
-	AL(pw, 8); aligned("the alignment of *pw", pw, 4);
-	AL(arr, 4); AL(sarr, 2); AL(st, 16); AL(bits, 4);
-	AL(u1, 8); AL(u2, 16); AL(u3, 16); AL(u4, 4); AL(u5, 4); AL(un, 8); AL(uarr, 8);
-	AL(pa, 8); AL(pend, 8); AL(self, 8); AL(nest, 4); AL(pnest, 8); AL(pstr, 8);
-	AL(pext, 8); AL(pextarr, 8);
-	AL(phidden, 8); aligned("the alignment of hidden", phidden, 4);
-	AL(pszero, 8); aligned("the alignment of szero", pszero, 4);
-	AL(psci, 8); aligned("the alignment of sci", psci, 2);
-	AL(ci, 4); AL(nul, 8); AL(one, 8); AL(zero, 4); AL(strs, 8); AL(tab, 8); AL(ptab, 8);
-	AL(ipt, 8); AL(zi, 4); AL(zp, 8); AL(zld, 16); AL(zst, 16); AL(zu, 16); AL(tab2, 8);
+	   point to, on a multiple of the alignment of its C type (as the
+	   compiler of this file has it), where that is more than 1.  The
+	   SysV ABI also aligns global arrays of 16 bytes or more to 16; lcc
+	   does not yet, so that is not checked */
+	AL(vs, short); AL(vus, unsigned short); AL(vi, int); AL(vu, unsigned); AL(vl, long); AL(vul, unsigned long); AL(lim, struct limits);
+	AL(vf, float); AL(negzf, float); AL(vd, double); AL(negz, double); AL(vld, long double); AL(ldmax, long double); AL(ldmin, long double);
+	AL(farr, float); AL(darr, double); AL(ldarr, long double);
+	AL(w, wchar_t); AL(wbig, wchar_t); AL(wexact, wchar_t); AL(wwide, wchar_t);
+	AL(pw, wchar_t *); aligned("the alignment of *pw", pw, ALIGNOF(wchar_t));
+	AL(arr, int); AL(sarr, short); AL(st, struct S); AL(bits, struct bf);
+	AL(u1, union uc); AL(u2, union us); AL(u3, union uld); AL(u4, union ubf); AL(u5, union ustr); AL(un, struct hasu); AL(uarr, union uc);
+	AL(pa, int *); AL(pend, char *); AL(self, struct node); AL(nest, struct nst); AL(pnest, int *); AL(pstr, char *);
+	AL(pext, int *); AL(pextarr, char *);
+	AL(phidden, int *); aligned("the alignment of hidden", phidden, ALIGNOF(int));
+	AL(pszero, int *); aligned("the alignment of szero", pszero, ALIGNOF(int));
+	AL(psci, short *); aligned("the alignment of sci", psci, ALIGNOF(short));
+	AL(ci, int); AL(nul, char *); AL(one, char *); AL(zero, int); AL(strs, char *); AL(tab, struct ent); AL(ptab, char *);
+	AL(ipt, char *); AL(zi, int); AL(zp, char *); AL(zld, long double); AL(zst, struct S); AL(zu, union us); AL(tab2, struct ent);
 
 	/* variables with each kind of initial value are writable: numbers,
 	   strings, zeros, a single address or pointer constant, bytes and

@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "port.h"
 long isum(int, ...); double dsum(int, ...); double mixed(const char *, ...);
 long late(int, int, int, int, int, int, ...);
 double dlate(double, double, double, double, double, double, double, double, int, ...);
@@ -52,21 +53,21 @@ int main(void) {
 	MIXED(("ccss", (char)-1, (char)127, (short)-32768, (short)32767));
 	MIXED(("bub", (unsigned char)255, 4000000000u, (unsigned char)0));
 	MIXED(("dididididididididid", 1.0, 2, 3.0, 4, 5.0, 6, 7.0, 8, 9.0, 10, 11.0, 12, 13.0, 14, 15.0, 16, 17.0, 18, 19.0));
-	MIXED(("llllllll", 1L, 2L, 3L, 4L, 5L, 6L, 7L, 0x100000000L));
+	MIXED(("llllllll", 1L, 2L, 3L, 4L, 5L, 6L, 7L, LV(0x100000000L, 0x10000L)));
 	MIXED(("pdpdpdpdpdpdpdpdpdpd", "ab", 1.5, "cd", 2.5, "ef", 3.5, "gh", 4.5, "ij", 5.5, "kl", 6.5, "mn", 7.5, "op", 8.5, "qr", 9.5, "st", 10.5));
 	CHK(mixed("i", -7), -7.0, "%g");
 	CHK(mixed("bub", (unsigned char)255, 4000000000u, (unsigned char)0), (255.0 * 2 + 4000000000.0) * 2, "%g");
 	CHK(late(1, 2, 3, 4, 5, 6, 7L, 8, 9.75), ((21L * 10 + 7) * 10 + 8) * 10 + 9, "%ld");
-	CHK(late(0, 0, 0, 0, 0, 0, -0x100000000L, -1, -2.5), ((-0x100000000L) * 10 - 1) * 10 - 2, "%ld");
+	CHK(late(0, 0, 0, 0, 0, 0, LV(-0x100000000L, -0x10000L), -1, -2.5), (LV(-0x100000000L, -0x10000L) * 10 - 1) * 10 - 2, "%ld");
 	CHK(dlate(1, 2, 3, 4, 5, 6, 7, 8, 0), 36.0, "%g");
 	CHK(dlate(1, 2, 3, 4, 5, 6, 7, 8, 3, 0.5, 1, 0.25, 2, -1.0, 3), ((36.0 * 2 + 0.5 + 1) * 2 + 0.25 + 2) * 2 - 1 + 3, "%g");
 	CHK(args(4, 12, 34L, 5, 6), 12 * 1000 + 34 + 5 * 7 - 6, "%ld");
 	CHK(twice(4, 1, 2, 3, 4), ((((10L * 2 + 1) * 2 + 2) * 2 + 3) * 2 + 4), "%ld");
 	CHK(twice(9, 1, 2, 3, 4, 5, 6, 7, 8, 9), 45L * 512 + 1 * 256 + 2 * 128 + 3 * 64 + 4 * 32 + 5 * 16 + 6 * 8 + 7 * 4 + 8 * 2 + 9, "%ld");
-	{ static const long la[] = { 1, 2, 3, -4, 5, -0x100000000L, 7, 8 };
+	{ static const long la[] = { 1, 2, 3, -4, 5, LV(-0x100000000L, -0x10000L), 7, 8 };
 	  CHK(passon(3, 1L, 2L, 3L), rvisum(3, la), "%ld");
-	  CHK(passon(8, 1L, 2L, 3L, -4L, 5L, -0x100000000L, 7L, 8L), rvisum(8, la), "%ld"); }
-	CHK(format(buf, "%d %s %.3f %ld %c %5.1e|", 42, "str", 3.14159, -1234567890123L, 'z', 6.02e23), sprintf(ref, "%d %s %.3f %ld %c %5.1e|", 42, "str", 3.14159, -1234567890123L, 'z', 6.02e23), "%d");
+	  CHK(passon(8, 1L, 2L, 3L, -4L, 5L, LV(-0x100000000L, -0x10000L), 7L, 8L), rvisum(8, la), "%ld"); }
+	CHK(format(buf, "%d %s %.3f %ld %c %5.1e|", 42, "str", 3.14159, LV(-1234567890123L, -1234567890L), 'z', 6.02e23), sprintf(ref, "%d %s %.3f %ld %c %5.1e|", 42, "str", 3.14159, LV(-1234567890123L, -1234567890L), 'z', 6.02e23), "%d");
 	CHK(strcmp(buf, ref), 0, "%d");
 	CHK(format(buf, "%g %g %g %g %g %g %g %g %g %g %d %d %d %d %d %d", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 1, 2, 3, 4, 5, 6),
 		sprintf(ref, "%g %g %g %g %g %g %g %g %g %g %d %d %d %d %d %d", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 1, 2, 3, 4, 5, 6), "%d");

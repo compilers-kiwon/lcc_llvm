@@ -1,9 +1,10 @@
 /*
- * Structures for the SysV x86-64 ABI tests in abi.c and abi-drv.c, with
+ * Structures for the ABI tests in abi.c and abi-drv.c, with
  * functions that fill them from k and sum their members (not their
  * padding).  SHAPES lists them.  vsum reads variable arguments.
  */
 #include <stdarg.h>
+#include "port.h"
 
 struct c1 { char a; };
 struct c3 { char a, b, c; };
@@ -63,9 +64,9 @@ static void fill_ic(struct ic *p, int k) { p->a = 123456 * k; p->b = 3 - k; }
 static double sum_ic(struct ic *p) { return p->a + 10.0 * p->b; }
 static void fill_i3(struct i3 *p, int k) { p->a = k; p->b = -2 * k - 1; p->c = 99999 * k; }
 static double sum_i3(struct i3 *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
-static void fill_l2(struct l2 *p, int k) { p->a = 0x100000001L * k; p->b = -7L * k - 1; }
+static void fill_l2(struct l2 *p, int k) { p->a = LV(0x100000001L, 0x10001L) * k; p->b = -7L * k - 1; }
 static double sum_l2(struct l2 *p) { return p->a + 10.0 * p->b; }
-static void fill_l3(struct l3 *p, int k) { p->a = k; p->b = -0x200000000L * k; p->c = 5 - k; }
+static void fill_l3(struct l3 *p, int k) { p->a = k; p->b = LV(-0x200000000L, -0x20000L) * k; p->c = 5 - k; }
 static double sum_l3(struct l3 *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
 static void fill_f1(struct f1 *p, int k) { p->a = k + 0.5f; }
 static double sum_f1(struct f1 *p) { return p->a; }
@@ -87,7 +88,7 @@ static void fill_ffi(struct ffi *p, int k) { p->a = k; p->b = 0.5f - k; p->c = k
 static double sum_ffi(struct ffi *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
 static void fill_cd(struct cd *p, int k) { p->a = 'A' + k; p->b = -k * 0.5; }
 static double sum_cd(struct cd *p) { return p->a + 10.0 * p->b; }
-static void fill_ul(union ul *p, int k) { p->l = -0x123456789L * k; }
+static void fill_ul(union ul *p, int k) { p->l = LV(-0x123456789L, -0x1234567L) * k; }
 static double sum_ul(union ul *p) { return p->l; }
 static void fill_uf(union uf *p, int k) { p->f[0] = k + 0.25f; p->f[1] = -k * 4.0f; }
 static double sum_uf(union uf *p) { return p->f[0] + 10.0 * p->f[1]; }
@@ -112,8 +113,8 @@ static void fill_ld1(struct ld1 *p, int k) { p->a = k + 1.0L / 3; }
 static double sum_ld1(struct ld1 *p) { return (double)((p->a - 1.0L / 3) * 4096); }
 static void fill_ld2(struct ld2 *p, int k) { p->a = k * 0.5L; p->b = -k - 1.0L / 7; }
 static double sum_ld2(struct ld2 *p) { return (double)(p->a + 10 * (p->b + 1.0L / 7)); }
-static void fill_ldi(struct ldi *p, int k) { p->a = 1e4000L * k; p->b = 3 * k; }
-static double sum_ldi(struct ldi *p) { return (double)(p->a / 1e3999L) + 10.0 * p->b; }
+static void fill_ldi(struct ldi *p, int k) { p->a = LDV(1e4000L, 1e300L) * k; p->b = 3 * k; }
+static double sum_ldi(struct ldi *p) { return (double)(p->a / LDV(1e3999L, 1e299L)) + 10.0 * p->b; }
 static void fill_cld(struct cld *p, int k) { p->c = 'A' + k; p->x = k + 1.0L / 11; }
 static double sum_cld(struct cld *p) { return p->c + 10.0 * (double)((p->x - (p->c - 'A')) * 121); }
 static void fill_uld(union uld *p, int k) { p->l = k + 1.0L / 9; }

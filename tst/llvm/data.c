@@ -8,6 +8,7 @@
  * the globals.
  */
 #include <stddef.h>	/* wchar_t */
+#include "port.h"
 
 /* integers: a plain char, one limit of each other type, then both
    limits of each */
@@ -18,16 +19,16 @@ short vs = -32768;
 unsigned short vus = 65535;
 int vi = -2147483647 - 1;
 unsigned vu = 4294967295U;
-long vl = -9223372036854775807L - 1;
-unsigned long vul = 18446744073709551615UL;
+long vl = LV(-9223372036854775807L, -2147483647L) - 1;
+unsigned long vul = LV(18446744073709551615UL, 4294967295UL);
 struct limits {
 	signed char sc[2]; unsigned char uc[2]; short s[2]; unsigned short us[2];
 	int i[2]; unsigned u[2]; long l[2]; unsigned long ul[2];
 } lim = {
 	{ -128, 127 }, { 0, 255 }, { -32768, 32767 }, { 0, 65535 },
 	{ -2147483647 - 1, 2147483647 }, { 0, 4294967295U },
-	{ -9223372036854775807L - 1, 9223372036854775807L },
-	{ 0, 18446744073709551615UL }
+	{ LV(-9223372036854775807L, -2147483647L) - 1, LV(9223372036854775807L, 2147483647L) },
+	{ 0, LV(18446744073709551615UL, 4294967295UL) }
 };
 
 /* floating: rounding, signed zeros, limits; ldmin is the smallest
@@ -37,8 +38,8 @@ float negzf = -0.0f;
 double vd = 0.1;
 double negz = -0.0;
 long double vld = 0.1L;
-long double ldmax = 1.18973149535723176502e+4932L;
-long double ldmin = 3.64519953188247460253e-4951L;
+long double ldmax = LDMAXC;
+long double ldmin = LDDENC;
 float farr[] = { 0.1f, -0.0f, 3.40282347e+38f, 1.17549435e-38f };
 double darr[] = { 0.1, -0.0, 1.7976931348623157e+308, 2.2250738585072014e-308 };
 long double ldarr[3] = { 1.5L, -0.0L, 0.1L };

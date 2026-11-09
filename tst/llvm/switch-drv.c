@@ -51,7 +51,7 @@ int deadsw(int), gotosw(int);
 static int bad, n;
 #define CHK(e, w, fmt) do { n++; if ((e) != (w)) { bad++; printf("%s: " fmt " != " fmt "\n", #e, e, w); } } while (0)
 static long lvals[] = { 0, 1, 7, 1000, 123456789L, -987654321L, LONG_MAX, LONG_MIN, LONG_MAX - 1, LONG_MAX - 4,
-	LONG_MAX - 5, LONG_MIN + 1, LONG_MIN + 3, LONG_MIN + 4, -1, 2, 5, 6, 0x100000000L, -0x100000000L };
+	LONG_MAX - 5, LONG_MIN + 1, LONG_MIN + 3, LONG_MIN + 4, -1, 2, 5, 6, LV(0x100000000L, 0x10000L), LV(-0x100000000L, -0x10000L) };
 static const char *progs[] = { "", "+++", "12*3-n.", "9/n/n/x", "abc+-*", "nnn.", "7*7*7*7*7*7*7*7*7*7", "q.9" };
 int main(void) {
 	long i; int j;

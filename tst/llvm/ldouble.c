@@ -1,7 +1,9 @@
 /*
- * long double as the x87 80-bit type: arithmetic, comparisons (NaN too),
+ * long double (the x87 80-bit type on x86-64, IEEE quad or double on
+ * other targets): arithmetic, comparisons (NaN too),
  * conversions to and from every arithmetic type, constants with more
- * digits than a double has, in data and in code, globals and their layout, arguments and
+ * digits than a double has and out of its range where long double has
+ * a wider one (port.h), in data and in code, globals and their layout, arguments and
  * results passed to and from functions compiled by clang, va_arg of long
  * double among other arguments, and printf's %Lg.  Compiled by lcc; ldouble-drv.c includes this file again,
  * compiled by clang, and compares the results bit for bit.
@@ -9,12 +11,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "port.h"
 
 long double ldext(long double, double, long double, int, long double);	/* in ldouble-drv.c */
 
 long double ldv[] = { 0.0L, -0.0L, 1.0L, -1.0L, 0.1L, 1.0L/3, 2.5L, -1e300L, 1e-300L,
-	1e4000L, -1e-4000L, 3.36210314311209350626e-4932L, 1.18973149535723176502e+4932L,
-	9223372036854775807.0L, 18446744073709551615.0L, 4294967296.5L, 1e-4945L };
+	LDV(1e4000L, 1.5e308L), LDV(-1e-4000L, -1e-310L), LDMINC, LDMAXC,
+	9223372036854775807.0L, 18446744073709551615.0L, 4294967296.5L, LDV(1e-4945L, 1e-320L) };
 #define NLD (sizeof ldv / sizeof ldv[0])
 struct lay { char c; long double x; int i; long double y[2]; } lay = { 'a', 1.5L, 7, { -0.25L, 1e100L } };
 
@@ -35,20 +38,20 @@ int compare(long double a, long double b) {
 }
 /* constants in code, not in data: LDBL_MAX, the least subnormal, LDBL_MIN */
 long double ldconst(int i) {
-	if (i == 0) return 1.18973149535723176502e+4932L;
-	if (i == 1) return 3.64519953188247460253e-4951L;
-	if (i == 2) return 3.36210314311209350626e-4932L;
+	if (i == 0) return LDMAXC;
+	if (i == 1) return LDDENC;
+	if (i == 2) return LDMINC;
 	if (i == 3) return -0.0L;
 	if (i == 4) return 0.1L;
-	if (i == 5) return -1e-4945L;
-	if (i == 6) return 1e4000L;
+	if (i == 5) return LDV(-1e-4945L, -1e-320L);
+	if (i == 6) return LDV(1e4000L, 1.5e308L);
 	if (i == 7) return 18446744073709551615.0L;
 	return 1.0L/3;
 }
 #define NCONST 9
 /* to other types, and back */
-long tolong(long double a) { return a < 9.2e18L && a > -9.2e18L ? (long)a : 0; }
-unsigned long toulong(long double a) { return a >= 0 && a < 1.8e19L ? (unsigned long)a : 0; }
+long tolong(long double a) { return a < LONG_MAX && a > LONG_MIN ? (long)a : 0; }
+unsigned long toulong(long double a) { return a >= 0 && a < ULONG_MAX ? (unsigned long)a : 0; }
 int toint(long double a) { return a < 2e9L && a > -2e9L ? (int)a : 0; }
 unsigned tounsigned(long double a) { return a >= 0 && a < 4e9L ? (unsigned)a : 0; }
 short toshort(long double a) { return a < 3e4L && a > -3e4L ? (short)a : 0; }
