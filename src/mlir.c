@@ -16,12 +16,12 @@
 #define I(f) mlir_##f
 static char rcsid[] = "$Id$";
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
 extern Interface I(id##IR);
 TARGETS
 #undef xx
 static struct target targets[] = {
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
 	{ &I(id##IR), triple, layout, ldtype, mlirld, abi },
 TARGETS
 #undef xx
@@ -166,7 +166,8 @@ static unsigned long fltbits(long double d, int size) {
    bits, which MLIR takes exactly: 8 or 16 hex digits, for the x87
    80 bits 4 of the sign and the exponent and 16 of the significand, and
    for IEEE quad 32 */
-static char *fltstr(long double d, int size) {
+static char *fltstr(Value v, int size) {
+	long double d = v.d;
 	char buf[35];
 	unsigned se;
 	unsigned long hi, lo;
@@ -175,10 +176,10 @@ static char *fltstr(long double d, int size) {
 	if (size <= 8) {
 		hexdigits(buf, 2, 2*size, fltbits(d, size));
 		buf[2 + 2*size] = 0;
-	} else if (strcmp(tg->ldtype, "fp128") == 0) {
+	} else if (IR->quadld) {
 		unsigned long w[4];
 		int i;
-		abi_fp128bits(d, w);
+		abi_fp128bits(v.q, w);
 		for (i = 0; i < 4; i++)
 			hexdigits(buf, 2 + 8*i, 8, w[i]);
 		buf[34] = 0;
@@ -256,9 +257,9 @@ static int itembytes(Item it, unsigned char b[]) {
 			u = fltbits(it->v.d, it->size);
 			break;
 		}
-		if (strcmp(tg->ldtype, "fp128") == 0) {
+		if (IR->quadld) {
 			unsigned long w[4];
-			abi_fp128bits(it->v.d, w);
+			abi_fp128bits(it->v.q, w);
 			for (i = 0; i < 16; i++)
 				b[i] = w[3 - i/4]>>8*(i%4);
 			return it->size;
@@ -490,7 +491,7 @@ static void emitglobal(Symbol p, Item items) {
 	if (it && it->link == NULL && it->kind == Kconst && it->suffix != P) {
 		ty = it->suffix == F ? flttypestr(it->size) : stringf("i%d", 8*it->size);
 		fprint(module, "%s : %s) {alignment = %d : i64} : %s\n",
-			it->suffix == F ? fltstr(it->v.d, it->size)
+			it->suffix == F ? fltstr(it->v, it->size)
 			: stringf("%D", sext(it->suffix == I ? it->v.i : it->v.u, it->size)),
 			ty, align, ty);
 		return;
@@ -851,9 +852,9 @@ static char *boolconst(int b) {
 	return pooled(v) ? v : topool(v, v, b ? "arith.constant true" : "arith.constant false");
 }
 
-/* fltconst - floating constant d of size bytes */
-static char *fltconst(long double d, int size) {
-	char *ty = flttypestr(size), *lit = fltstr(d, size);
+/* fltconst - floating constant c of size bytes */
+static char *fltconst(Value c, int size) {
+	char *ty = flttypestr(size), *lit = fltstr(c, size);
 	char *k = string(stringf("%s : %s", lit, ty)), *v = pooled(k);
 
 	if (v)
@@ -925,7 +926,7 @@ static char *cnstval(int op, Value v) {
 	case I: return iconst(sext(v.i, opsize(op)), optypestr(op));
 	case U: return iconst(sext(v.u, opsize(op)), optypestr(op));
 	case P: return ptrconst(v.p);
-	case F: return fltconst(v.d, opsize(op));
+	case F: return fltconst(v, opsize(op));
 	}
 	assert(0);
 	return NULL;
@@ -2371,7 +2372,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
-TARGETIR(id, lsize, ldsize, psize, uchar);
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
+TARGETIR(id, lsize, ldsize, psize, uchar, quad);
 TARGETS
 #undef xx

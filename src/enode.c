@@ -188,7 +188,12 @@ Tree cnsttree(Type ty, ...) {
 	switch (ty->op) {
 	case INT:     p->u.v.i = va_arg(ap, long); break;
 	case UNSIGNED:p->u.v.u = va_arg(ap, unsigned long)&ones(8*ty->size); break;
-	case FLOAT:   p->u.v.d = va_arg(ap, long double);
+	case FLOAT:
+		if (isquad(ty)) {
+			p->u.v.q = q_fromld(va_arg(ap, long double));
+			break;
+		}
+		p->u.v.d = va_arg(ap, long double);
 		/* a value of the type, as at run time: float and double have
 		   4 and 8 bytes; those out of range are left alone */
 		if (p->u.v.d >= ty->u.sym->u.limits.min.d
@@ -202,6 +207,15 @@ Tree cnsttree(Type ty, ...) {
 	default: assert(0);
 	}
 	va_end(ap);
+	return p;
+}
+
+/* quadtree - the long double constant q, if isquad(ty) */
+Tree quadtree(Type ty, Quad q) {
+	Tree p = tree(mkop(CNST,ty), ty, NULL, NULL);
+
+	assert(isquad(ty));
+	p->u.v.q = q;
 	return p;
 }
 
@@ -385,7 +399,8 @@ Tree condtree(Tree e, Tree l, Tree r) {
 	case CNST+I: return cast(e->u.v.i != 0   ? l : r, ty);
 	case CNST+U: return cast(e->u.v.u != 0   ? l : r, ty);
 	case CNST+P: return cast(e->u.v.p != 0   ? l : r, ty);
-	case CNST+F: return cast(e->u.v.d != 0.0 ? l : r, ty);
+	case CNST+F: return cast((isquad(e->type) ? !q_iszero(e->u.v.q)
+			: e->u.v.d != 0.0) ? l : r, ty);
 	}
 	if (ty != voidtype && ty->size > 0) {
 		t1 = genident(REGISTER, unqual(ty), level);

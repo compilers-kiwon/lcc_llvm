@@ -50,6 +50,7 @@ RCCOBJS=$Balloc$O \
 	$Bstmt$O \
 	$Bstring$O \
 	$Bsym$O \
+	$Bquad$O \
 	$Btrace$O \
 	$Btree$O \
 	$Btypes$O \
@@ -100,6 +101,7 @@ $Bsimp$O:	src/simp.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/simp.c
 $Bstmt$O:	src/stmt.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/stmt.c
 $Bstring$O:	src/string.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/string.c
 $Bsym$O:	src/sym.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sym.c
+$Bquad$O:	src/quad.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/quad.c
 $Bllvm$O:	src/llvm.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/llvm.c
 $Babi$O:	src/abi.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/abi.c
 $Bsysv$O:	src/sysv.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sysv.c
@@ -260,6 +262,7 @@ RCCSRCS=src/alloc.c \
 	src/stmt.c \
 	src/string.c \
 	src/sym.c \
+	src/quad.c \
 	src/trace.c \
 	src/tree.c \
 	src/types.c \

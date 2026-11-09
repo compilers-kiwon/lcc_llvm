@@ -64,7 +64,7 @@ extern void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t
 extern int abi_returnstwice(char *);
 extern int aapcs64_hfa(Type, Type *);
 
-extern void abi_fp128bits(long double, unsigned long [4]);
+extern void abi_fp128bits(Quad, unsigned long [4]);
 
 /* SysV x86-64 parts for va_arg, and the x87 80-bit format */
 extern int sysv_structparts(Type, struct regs *, char *[]);

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
+#include "quad.h"
 
 #define NEW(p,a) ((p) = allocate(sizeof *(p), (a)))
 #define NEW0(p,a) memset(NEW((p),(a)), 0, sizeof *(p))
@@ -17,6 +18,8 @@
 #define istypename(t,tsym) (kind[t] == CHAR \
 	|| t == ID && tsym && tsym->sclass == TYPEDEF)
 #define sizeop(n) ((n)<<10)
+/* isquad - whether constants of type ty are kept as Quad */
+#define isquad(ty) (IR->quadld && unqual(ty) == longdouble)
 #define generic(op)  ((op)&0x3F0)
 #define specific(op) ((op)&0x3FF)
 #define opindex(op) (((op)>>4)&0x3F)
@@ -83,6 +86,7 @@ typedef union value {
 	long i;
 	unsigned long u;
 	long double d;
+	Quad q;		/* a long double if IR->quadld */
 	void *p;
 	void (*g)(void);
 } Value;
@@ -147,6 +151,7 @@ void (*stabline) (Coordinate *);
 void (*stabsym)  (Symbol);
 void (*stabtype) (Symbol);
 	Xinterface x;
+	unsigned quadld:1;	/* long double is IEEE quad, kept as Quad */
 } Interface;
 typedef struct binding {
 	char *name;
@@ -443,6 +448,7 @@ extern Tree call(Tree, Type, Coordinate);
 extern Tree calltree(Tree, Type, Tree, Symbol);
 extern Tree condtree(Tree, Tree, Tree);
 extern Tree cnsttree(Type, ...);
+extern Tree quadtree(Type, Quad);
 extern Tree consttree(int, Type);
 extern Tree eqtree(int, Tree, Tree);
 extern int iscallb(Tree);

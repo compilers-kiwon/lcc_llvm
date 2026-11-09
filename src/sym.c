@@ -179,7 +179,10 @@ Symbol constant(Type ty, Value v) {
 			case INT:      if (equalp(i)) return &p->sym; break;
 			case UNSIGNED: if (equalp(u)) return &p->sym; break;
 			case FLOAT:
-				if (v.d == 0.0) {
+				if (isquad(ty)) {
+					if (memcmp(&v.q, &p->sym.u.c.v.q, sizeof v.q) == 0)
+						return &p->sym;
+				} else if (v.d == 0.0) {
 					float z1 = v.d, z2 = p->sym.u.c.v.d;
 					char *b1 = (char *)&z1, *b2 = (char *)&z2;
 					if (z1 == z2
@@ -317,7 +320,7 @@ char *vtoa(Type ty, Value v) {
 	switch (ty->op) {
 	case INT:      return stringd(v.i);
 	case UNSIGNED: return stringf((v.u&~0x7FFF) ? "0x%X" : "%U", v.u);
-	case FLOAT:    return stringf("%g", (double)v.d);
+	case FLOAT:    return stringf("%g", (double)(isquad(ty) ? q_told(v.q) : v.d));
 	case ARRAY:
 		if (ty->type == chartype || ty->type == signedchar
 		||  ty->type == unsignedchar)

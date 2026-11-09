@@ -1,22 +1,23 @@
 /*
  * The targets of the llvm and mlir back ends.  For each,
  *
- *	xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi)
+ *	xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi)
  *
  * gives the suffix of its Interfaces' names, the LLVM target triple and
  * data layout, the LLVM and MLIR types of long double, the sizes, which
  * are also the alignments, of long, long double and pointers, whether
- * plain char is unsigned, and the calling convention (abi.h).  The other types are the same on all
+ * plain char is unsigned, whether long double is IEEE quad, which the
+ * front end then keeps as Quad, and the calling convention (abi.h).  The other types are the same on all
  * of them: char 1, short 2, int 4, long long 8, float 4 and double 8
  * bytes, aligned to their sizes.
  */
 #define TARGETS \
 xx(x86_64_linux, "x86_64-pc-linux-gnu", \
 	"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", \
-	"x86_fp80", "f80", 8, 16, 8, 0, &sysvabi) \
+	"x86_fp80", "f80", 8, 16, 8, 0, 0, &sysvabi) \
 xx(aarch64_linux, "aarch64-unknown-linux-gnu", \
 	"e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128", \
-	"fp128", "f128", 8, 16, 8, 1, &aapcs64abi)
+	"fp128", "f128", 8, 16, 8, 1, 1, &aapcs64abi)
 
 /* a target, as a back end looks it up from IR */
 struct target {
@@ -31,7 +32,7 @@ struct target {
  * are named I(f).  The llvm and mlir back ends take the dags in the
  * same form.
  */
-#define TARGETIR(id, lsize, ldsize, psize, uchar) \
+#define TARGETIR(id, lsize, ldsize, psize, uchar, quad) \
 Interface I(id##IR) = { \
 	1, 1, 0,		/* char */ \
 	2, 2, 0,		/* short */ \
@@ -74,5 +75,7 @@ Interface I(id##IR) = { \
 	I(stabinit), \
 	I(stabline), \
 	I(stabsym), \
-	I(stabtype) \
+	I(stabtype), \
+	{0},			/* x */ \
+	quad			/* quadld */ \
 }

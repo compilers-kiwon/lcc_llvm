@@ -15,12 +15,12 @@
 #define I(f) llvm_##f
 static char rcsid[] = "$Id$";
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
 extern Interface I(id##IR);
 TARGETS
 #undef xx
 static struct target targets[] = {
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
 	{ &I(id##IR), triple, layout, ldtype, mlirld, abi },
 TARGETS
 #undef xx
@@ -329,13 +329,13 @@ static char *fp80str(long double d) {
 	return string(buf);
 }
 
-/* fp128str - d as an IEEE quad constant: 0xL, then the low 64 bits and
+/* fp128str - q as an IEEE quad constant: 0xL, then the low 64 bits and
    the high 64 bits */
-static char *fp128str(long double d) {
+static char *fp128str(Quad q) {
 	char buf[36];
 	unsigned long w[4];
 
-	abi_fp128bits(d, w);
+	abi_fp128bits(q, w);
 	hexdigits(buf, 3, 8, w[2]);
 	hexdigits(buf, 11, 8, w[3]);
 	hexdigits(buf, 19, 8, w[0]);
@@ -344,16 +344,18 @@ static char *fp128str(long double d) {
 	return string(buf);
 }
 
-/* floatstr - floating constant d of size bytes, in LLVM's hex form */
-static char *floatstr(long double d, int size) {
+/* floatstr - floating constant v of size bytes, in LLVM's hex form; a
+   quad long double is v.q */
+static char *floatstr(Value v, int size) {
 	static union { int x; char endian; } little = { 1 };
+	long double d = v.d;
 	double x = size == 4 ? (double)(float)d : (double)d;
 	unsigned char b[sizeof x];
 	char buf[2*sizeof x + 3], *s = buf;
 	int i;
 
 	if (size > 8)
-		return strcmp(tg->ldtype, "fp128") == 0 ? fp128str(d) : fp80str(d);
+		return IR->quadld ? fp128str(v.q) : fp80str(d);
 	memcpy(b, &x, sizeof x);
 	*s++ = '0';
 	*s++ = 'x';
@@ -377,7 +379,7 @@ static char *cnststr(int op, Value v) {
 	case I: return intstr(v.i, opsize(op));
 	case U: return intstr(v.u, opsize(op));
 	case P: return ptrstr(v.p);
-	case F: return floatstr(v.d, opsize(op));
+	case F: return floatstr(v, opsize(op));
 	}
 	assert(0);
 	return NULL;
@@ -1336,7 +1338,7 @@ static void I(defconst)(int suffix, int size, Value v) {
 	case U: it->type = stringf("i%d", 8*size); it->val = intstr(v.u, size); break;
 	case P: it->type = "ptr"; it->val = ptrstr(v.p); break;
 	case F: it->type = flttypestr(size);
-		it->val = floatstr(v.d, size); break;
+		it->val = floatstr(v, size); break;
 	default: assert(0);
 	}
 }
@@ -1601,7 +1603,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, abi) \
-TARGETIR(id, lsize, ldsize, psize, uchar);
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
+TARGETIR(id, lsize, ldsize, psize, uchar, quad);
 TARGETS
 #undef xx

@@ -57,7 +57,11 @@ static Type xxinit(int op, char *name, Metrics m) {
 			p->u.limits.max.d =  FLT_MAX;
 		else if (ty->size == sizeof (double))
 			p->u.limits.max.d =  DBL_MAX;
-		else
+		else if (IR->quadld) {
+			p->u.limits.max.q = q_max();
+			p->u.limits.min.q = q_neg(q_max());
+			break;
+		} else
 			p->u.limits.max.d = LDBL_MAX;
 		p->u.limits.min.d = -p->u.limits.max.d;
 		break;

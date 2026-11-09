@@ -47,19 +47,11 @@ int abi_returnstwice(char *name) {
 	return 0;
 }
 
-/*
- * abi_fp128bits - the IEEE quad form of d in w[0..3], 32 bits each, the
- * most significant first.  d has only the 64 significant bits of the
- * x87 long double, the host's.
- */
-void abi_fp128bits(long double d, unsigned long w[4]) {
-	unsigned se;
-	unsigned long hi, lo;
+/* abi_fp128bits - the bits of q in w[0..3], 32 each, the most
+   significant first */
+void abi_fp128bits(Quad q, unsigned long w[4]) {
+	int i;
 
-	sysv_fp80bits(d, &se, &hi, &lo);
-	hi &= 0x7FFFFFFFUL;	/* the leading 1 is implicit */
-	w[0] = (unsigned long)se<<16 | hi>>15;
-	w[1] = (hi&0x7FFF)<<17 | lo>>15;
-	w[2] = (lo&0x7FFF)<<17;
-	w[3] = 0;
+	for (i = 0; i < 4; i++)
+		w[i] = (unsigned long)q.h[2*i]<<16 | q.h[2*i+1];
 }

@@ -49,6 +49,15 @@ static char rcsid[] = "$Id$";
 		warning("result of unsigned comparison is constant\n"); \
 		return tree(RIGHT, inttype, root(L), cnsttree(inttype, (long)(V))); } while(0)
 #define idempotent(OP) if (l->op == OP) return l->kids[0]
+/* folding of long double constants kept as Quad (isquad) */
+#define qfoldcnst(FUNC,DIV) \
+	if (l->op == CNST+F && r->op == CNST+F \
+	&& qfoldok(l->u.v.q, r->u.v.q, FUNC(l->u.v.q, r->u.v.q), DIV)) \
+		return quadtree(ty, FUNC(l->u.v.q, r->u.v.q))
+#define qcfoldcnst(COND) \
+	if (l->op == CNST+F && r->op == CNST+F && isquad(l->type)) { \
+		int c = q_cmp(l->u.v.q, r->u.v.q); \
+		return cnsttree(inttype, (long)(COND)); }
 
 int needconst;
 int explicitCast;
@@ -80,6 +89,19 @@ static int addd(double x, double y, double min, double max, int needconst) {
 	return cond;
 
 
+}
+
+/* qfoldok - whether r, the sum, difference, product or (with div)
+   quotient of a and b, may replace them: not a division by 0 and no
+   overflow, unless a constant is needed */
+static int qfoldok(Quad a, Quad b, Quad r, int div) {
+	int cond = !(div && q_iszero(b))
+		&& !(q_isinf(r) && !q_isinf(a) && !q_isinf(b));
+	if (!cond && needconst) {
+		warning("overflow in constant expression\n");
+		cond = 1;
+	}
+	return cond;
 }
 
 static Tree addrtree(Tree e, long n, Type ty) {
@@ -250,15 +272,52 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			break;
 
 		case CVI+F:
+			if (l->op == CNST+I && isquad(ty))
+				return quadtree(ty, q_fromlong(l->u.v.i));
 			xcvtcnst(I,l->u.v.i,ty,d,(long double)l->u.v.i);
 		case CVU+F:
+			if (l->op == CNST+U && isquad(ty))
+				return quadtree(ty, q_fromulong(l->u.v.u));
 			xcvtcnst(U,l->u.v.u,ty,d,(long double)l->u.v.u);
 			break;
 		case CVF+I:
+			if (l->op == CNST+F && isquad(l->type)) {
+				Quad x = l->u.v.q;
+				int out = q_cmp(x, q_fromlong(ty->u.sym->u.limits.min.i)) == -1
+					|| q_cmp(x, q_fromlong(ty->u.sym->u.limits.max.i)) == 1;
+				if (!explicitCast && out)
+					warning("overflow in converting constant expression from `%t' to `%t'\n", l->type, ty);
+				if (needconst || !out)
+					return cnsttree(ty, q_tolong(x));
+				break;
+			}
 			xcvtcnst(F,l->u.v.d,ty,i,(long)l->u.v.d);
 			break;
 		case CVF+F: {
 			long double d;
+			if (l->op == CNST+F && isquad(l->type)) {	/* to float or double */
+				Quad x = l->u.v.q, max = q_fromld(ty->u.sym->u.limits.max.d);
+				int out = q_cmp(x, q_neg(max)) == -1 || q_cmp(x, max) == 1;
+				if (!explicitCast && out)
+					warning("overflow in converting constant expression from `%t' to `%t'\n", l->type, ty);
+				if (needconst || !out) {
+					if (q_cmp(x, max) == 1)
+						x = max;
+					else if (q_cmp(x, q_neg(max)) == -1)
+						x = q_neg(max);
+					return cnsttree(ty, ty->size == 4
+						? (long double)q_tofloat(x) : (long double)q_todouble(x));
+				}
+				break;
+			}
+			if (l->op == CNST+F && isquad(ty)) {	/* from float or double */
+				d = l->u.v.d;
+				if (l->type->size == 4)
+					d = (float)d;
+				else
+					d = (double)d;
+				return quadtree(ty, q_fromld(d));
+			}
 			if (l->op == CNST+F) {
 				if (l->u.v.d < ty->u.sym->u.limits.min.d)
 					d = ty->u.sym->u.limits.min.d;
@@ -363,7 +422,11 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			break;
 
 		case ADD+F:
-			xfoldcnst(F,d,+,addd);
+			if (isquad(ty)) {
+				qfoldcnst(q_add,0);
+			} else {
+				xfoldcnst(F,d,+,addd);
+			}
 			commute(r,l);
 			break;
 		case AND+I:
@@ -404,7 +467,11 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			identity(r,l,I,i,0);
 			break;
 		case DIV+F:
-			xfoldcnst(F,d,/,divd);
+			if (isquad(ty)) {
+				qfoldcnst(q_div,1);
+			} else {
+				xfoldcnst(F,d,/,divd);
+			}
 			break;
 		case DIV+I:
 			identity(r,l,I,i,1);
@@ -423,6 +490,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			foldcnst(U,u,/);
 			break;
 		case EQ+F:
+			qcfoldcnst(c == 0);
 			cfoldcnst(F,d,==);
 			commute(r,l);
 			break;
@@ -431,7 +499,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			commute(r,l);
 			zerofield(EQ,U,u);
 			break;
-		case GE+F: cfoldcnst(F,d,>=); break;
+		case GE+F: qcfoldcnst(c == 1 || c == 0); cfoldcnst(F,d,>=); break;
 		case GE+I: cfoldcnst(I,i,>=); break;
 		case GE+U:
 			geu(l,r,1);	/* l >= 0 => (l,1) */
@@ -439,7 +507,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			if (l->op == CNST+U && l->u.v.u == 0)	/* 0 >= r => r == 0 */
 				return eqtree(EQ, r, l);
 			break;
-		case GT+F: cfoldcnst(F,d, >); break;
+		case GT+F: qcfoldcnst(c == 1); cfoldcnst(F,d, >); break;
 		case GT+I: cfoldcnst(I,i, >); break;
 		case GT+U:
 			geu(r,l,0);	/* 0 > r => (r,0) */
@@ -447,7 +515,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			if (r->op == CNST+U && r->u.v.u == 0)	/* l > 0 => l != 0 */
 				return eqtree(NE, l, r);
 			break;
-		case LE+F: cfoldcnst(F,d,<=); break;
+		case LE+F: qcfoldcnst(c == -1 || c == 0); cfoldcnst(F,d,<=); break;
 		case LE+I: cfoldcnst(I,i,<=); break;
 		case LE+U:
 			geu(r,l,1);	/* 0 <= r => (r,1) */
@@ -477,7 +545,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 
 			break;
 
-		case LT+F: cfoldcnst(F,d, <); break;
+		case LT+F: qcfoldcnst(c == -1); cfoldcnst(F,d, <); break;
 		case LT+I: cfoldcnst(I,i, <); break;
 		case LT+U:
 			geu(l,r,0);	/* l < 0 => (l,0) */
@@ -502,7 +570,11 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			foldcnst(U,u,%);
 			break;
 		case MUL+F:
-			xfoldcnst(F,d,*,muld);
+			if (isquad(ty)) {
+				qfoldcnst(q_mul,0);
+			} else {
+				xfoldcnst(F,d,*,muld);
+			}
 			commute(l,r);
 			break;
 		case MUL+I:
@@ -522,6 +594,7 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			identity(r,l,I,i,1);
 			break;
 		case NE+F:
+			qcfoldcnst(c != 0);
 			cfoldcnst(F,d,!=);
 			commute(r,l);
 			break;
@@ -531,6 +604,8 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 			zerofield(NE,U,u);
 			break;
 		case NEG+F:
+			if (l->op == CNST+F && isquad(ty))
+				return quadtree(ty, q_neg(l->u.v.q));
 			ufoldcnst(F,cnsttree(ty, -l->u.v.d));
 			idempotent(NEG+F);
 			break;
@@ -572,7 +647,11 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 
 			break;
 		case SUB+F:
-			xfoldcnst(F,d,-,subd);
+			if (isquad(ty)) {
+				qfoldcnst(q_sub,0);
+			} else {
+				xfoldcnst(F,d,-,subd);
+			}
 			break;
 		case SUB+I:
 			xfoldcnst(I,i,-,subi);

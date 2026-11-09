@@ -780,7 +780,12 @@ static Symbol fcon(void) {
 	}
 
 	errno = 0;
-	if ((*cp == 'l' || *cp == 'L') && longdouble->size > doubletype->size)
+	if ((*cp == 'l' || *cp == 'L') && IR->quadld) {
+		tval.u.c.v.q = q_fromstr(token);	/* exact, unlike the host's */
+		if (q_isinf(tval.u.c.v.q))
+			warning("overflow in floating constant `%S'\n", token,
+				(char*)cp - token);
+	} else if ((*cp == 'l' || *cp == 'L') && longdouble->size > doubletype->size)
 		tval.u.c.v.d = strtold(token, NULL);	/* more digits than a double */
 	else if ((*cp == 'f' || *cp == 'F') && floattype->size < doubletype->size) {
 		tval.u.c.v.d = strtof(token, NULL);	/* a float's value, rounded once */
