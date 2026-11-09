@@ -988,6 +988,31 @@ static int structparts(Type ty, struct regs *r, char *part[]) {
 	return n;
 }
 
+/* extattr - the extension attribute of a scalar argument of MLIR type
+   t, or NULL */
+static char *extattr(char *t) {
+	char *a = tg->abi->extattr ? (*tg->abi->extattr)(t) : NULL;
+
+	return a ? stringf("{llvm.%s}", a) : NULL;
+}
+
+/* resstr - the result type t of function type fty, NULL if none, with
+   its extension attribute: a char or short result is narrow (restypestr),
+   and extended as its type is where an int one is */
+static char *resstr(char *t, Type fty) {
+	Type rty = unqual(freturn(fty));
+	char *a;
+
+	if (t == NULL || tg->abi->extattr == NULL)
+		return t;
+	if ((isint(rty) || isenum(rty)) && rty->size < inttype->size)
+		a = (*tg->abi->extattr)(typestr(inttype)) == NULL ? NULL
+			: isunsigned(rty) ? "zeroext" : "signext";
+	else
+		a = (*tg->abi->extattr)(t);
+	return a ? stringf("(%s {llvm.%s})", t, a) : t;
+}
+
 /* parttype - the MLIR type of part p */
 static char *parttype(struct part *p) {
 	char *t;
@@ -1191,7 +1216,7 @@ static void sigparams(Type rty, Type ty[], int n, int base, char **plain,
 	for (i = 0; i < n; i++)
 		if (!isstruct(ty[i])) {
 			t = argtypestr(ty[i]);
-			addparam(plain, typed, named, t, NULL, stringf("%%a%d", base + i));
+			addparam(plain, typed, named, t, extattr(t), stringf("%%a%d", base + i));
 			scalarreg(t, &r);
 		} else if ((k = (*tg->abi->arg)(ty[i], &r, &part)) == ABYVAL)
 			addparam(plain, typed, named, "!llvm.ptr", byvalstr(ty[i]),
@@ -1426,6 +1451,37 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 }
 
 /*
+ * vaaddrptr - emit the address of the next argument of type ty in
+ * va_list ap, and step ap past it, as RISC-V does: ap points to the
+ * next argument in memory, where the callee has stored the argument
+ * registers next to the arguments on the stack; each takes a multiple
+ * of 8 bytes, those aligned to 16 start at a multiple of 16, and a
+ * structure of more than 16 bytes is passed by the address of a copy.
+ */
+static char *vaaddrptr(char *ap, Type ty) {
+	int byref = isstruct(ty) && ty->size > 16;
+	char *p = newreg();
+
+	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", p, ap);
+	if (!byref && ty->align > 8) {	/* round up to 16 */
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = llvm.ptrtoint %s : !llvm.ptr to i64", x, p);
+		inst("%s = arith.addi %s, %s : i64", y, x, iconst(15, "i64"));
+		inst("%s = arith.andi %s, %s : i64", z, y, iconst(-16, "i64"));
+		inst("%s = llvm.inttoptr %s : i64 to !llvm.ptr", w, z);
+		p = w;
+	}
+	inst("llvm.store %s, %s : !llvm.ptr, !llvm.ptr",
+		gepconst(p, byref ? 8 : roundup(ty->size, 8)), ap);
+	if (byref) {
+		char *q = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", q, p);
+		p = q;
+	}
+	return p;
+}
+
+/*
  * vaaddr64 - emit the address of the next argument of type ty in va_list
  * ap, and step ap past it, as AAPCS64 does.  ap has __stack at 0,
  * __gr_top at 8, __vr_top at 16, __gr_offs at 24 and __vr_offs at 28;
@@ -1581,6 +1637,8 @@ static char *emitbuiltin(Node p, int b) {
 	}
 	if (tg->abi == &aapcs64abi)
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
+	else if (tg->abi == &riscv64abi)
+		v = vaaddrptr(ap, ty);
 	else
 		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* a float, which came as a double */
@@ -1627,8 +1685,11 @@ static char *emitcall(Node p) {
 		} else
 			res->attr = sretstr(rty);
 	}
-	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
-		nfixed = 0;
+	if (fty->u.f.proto == NULL || fty->u.f.oldstyle) {
+		nfixed = tg->abi->krfixed ? -1 : 0;
+		if (nfixed < 0 && specific(p->kids[0]->op) == ADDRG+P)
+			nfixed = abi_libvariadic(p->kids[0]->syms[0]->name);
+	}
 	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
@@ -1642,9 +1703,13 @@ static char *emitcall(Node p) {
 	(*tg->abi->init)(&r);
 	for (i = 0, a = args; a; i++, a = a->link) {
 		a->fixed = nfixed < 0 || i < nfixed;
+		r.va = !a->fixed;
 		n = 0;
-		if (a->sty == NULL)
+		if (a->sty == NULL) {
 			scalarreg(a->type, &r);
+			if (extattr(a->type))
+				a->attr = extattr(a->type);
+		}
 		else if ((n = (*tg->abi->arg)(a->sty, &r, &part)) == ABYVAL) {
 			a->type = "!llvm.ptr";
 			a->attr = byvalstr(a->sty);
@@ -2182,7 +2247,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		fprint(module, "%s...", *named ? ", " : "");
 	fprint(module, ")");
 	if (restype)
-		fprint(module, " -> %s", restype);
+		fprint(module, " -> %s", resstr(restype, f->type));
 	if (fkind == FUNCFUNC && f->sclass == STATIC)
 		fprint(module, " attributes {llvm.linkage = #llvm.linkage<internal>}");
 	fprint(module, " {\n");
@@ -2293,7 +2358,7 @@ static void I(import)(Symbol p) {
 			struct fninfo *f = fninfo(p);
 			fprint(module, "func.func private @\"%s\"(%s)", gname(p), f->typed);
 			if (f->result)
-				fprint(module, " -> %s", f->result);
+				fprint(module, " -> %s", resstr(f->result, fty));
 		} else {
 			if (proto && !fty->u.f.oldstyle)
 				for ( ; proto[n] && proto[n] != voidtype; n++)
@@ -2304,7 +2369,7 @@ static void I(import)(Symbol p) {
 				fprint(module, "%s...", *typed ? ", " : "");
 			fprint(module, ")");
 			if (restypestr(p->type))
-				fprint(module, " -> %s", restypestr(p->type));
+				fprint(module, " -> %s", resstr(restypestr(p->type), p->type));
 		}
 		if (abi_returnstwice(p->name))
 			fprint(module, " attributes {passthrough = [\"returns_twice\"]}");

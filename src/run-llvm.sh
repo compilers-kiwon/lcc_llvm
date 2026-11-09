@@ -3,9 +3,9 @@
 #
 # usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
 #
-# target is that of the lcc in builddir: x86_64-linux (the default), or
-# aarch64-linux, whose programs run with qemu-aarch64; $TARGET too.  The
-# lcc may be an AArch64 program itself (src/selfhost.sh -x aarch64-linux).
+# target is that of the lcc in builddir: x86_64-linux (the default),
+# aarch64-linux or riscv64-linux, whose programs run with qemu; $TARGET
+# too.  The lcc may be a program of that target itself (src/selfhost.sh -x).
 #
 # suites:
 #   lcc               tst/*.c; input tst/NAME.0, stdout compared with NAME.1bk
@@ -103,6 +103,14 @@ aarch64-linux)
 	case "$DRVCC" in
 	clang)	DRVCC="clang --target=aarch64-linux-gnu -fuse-ld=lld" ;;
 	gcc)	DRVCC=aarch64-linux-gnu-gcc ;;
+	esac ;;
+riscv64-linux)
+	RUN="qemu-riscv64 -L /usr/riscv64-linux-gnu" NM=llvm-nm-18
+	QEMU_LD_PREFIX=/usr/riscv64-linux-gnu
+	export QEMU_LD_PREFIX
+	case "$DRVCC" in
+	clang)	DRVCC="clang --target=riscv64-linux-gnu -fuse-ld=lld" ;;
+	gcc)	DRVCC=riscv64-linux-gnu-gcc ;;
 	esac ;;
 *)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
 esac

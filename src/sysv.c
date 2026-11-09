@@ -201,6 +201,7 @@ void sysv_fp80bits(long double d, unsigned *se, unsigned long *hi, unsigned long
 static void initregs(struct regs *r) {
 	r->gp = 6;
 	r->fp = 8;
+	r->va = 0;
 }
 
 /* arg - the parts of sysv_structparts, one element each */

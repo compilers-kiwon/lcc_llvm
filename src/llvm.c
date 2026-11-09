@@ -281,6 +281,14 @@ static char *partstr(struct part *p) {
 	return p->alignstack ? stringf("%s %s", p->type, partattr(p)) : p->type;
 }
 
+/* extattr - the extension attribute of a scalar of LLVM type t, with a
+   space before it, or "" */
+static char *extattr(char *t) {
+	char *a = tg->abi->extattr ? (*tg->abi->extattr)(t) : NULL;
+
+	return a ? stringf(" %s", a) : "";
+}
+
 /* rettypestr - LLVM return type of function type fty */
 static char *rettypestr(Type fty) {
 	Type rty = freturn(fty);
@@ -702,6 +710,38 @@ static char *vaaddr64(char *ap, Type ty, char *slot) {
 }
 
 /*
+ * vaaddrptr - emit the va_arg of RISC-V for an argument of type ty, and
+ * return its address.  The va_list ap is a pointer to the next argument
+ * in memory, where the callee has stored the argument registers next to
+ * the arguments on the stack; each takes a multiple of 8 bytes, those
+ * aligned to 16 start at a multiple of 16, and a structure of more than
+ * 16 bytes is passed by the address of a copy.
+ */
+static char *vaaddrptr(char *ap, Type ty) {
+	int byref = isstruct(ty) && ty->size > 16;
+	int size = byref ? 8 : roundup(ty->size, 8);
+	char *p = newreg(), *next = newreg();
+
+	inst("%s = load ptr, ptr %s", p, ap);
+	if (!byref && ty->align > 8) {
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = ptrtoint ptr %s to i64", x, p);
+		inst("%s = add i64 %s, 15", y, x);
+		inst("%s = and i64 %s, -16", z, y);
+		inst("%s = inttoptr i64 %s to ptr", w, z);
+		p = w;
+	}
+	inst("%s = getelementptr i8, ptr %s, i64 %d", next, p, size);
+	inst("store ptr %s, ptr %s", next, ap);
+	if (byref) {
+		char *q = newreg();
+		inst("%s = load ptr, ptr %s", q, p);
+		p = q;
+	}
+	return p;
+}
+
+/*
  * emitbuiltin - emit the call p to the stdarg function b.  va_arg
  * returns the address of a value of the type promoted by a call (int
  * for char and short, whose bytes come first, and double for float).
@@ -735,6 +775,8 @@ static char *emitbuiltin(Node p, int b) {
 	ty = unqual(freturn(p->syms[0]->type)->type);
 	if (tg->abi == &aapcs64abi)
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
+	else if (tg->abi == &riscv64abi)
+		v = vaaddrptr(ap, ty);
 	else
 		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* float */
@@ -950,7 +992,10 @@ static char *nodeval(Node p) {
  * A function without a prototype is called as (...), and a variadic one
  * as (fixed, ...).  The arguments have their default promotions, and
  * SysV passes them in the same registers either way; a variadic call
- * also sets %al, which a callee with variable arguments needs.
+ * also sets %al, which a callee with variable arguments needs.  Where
+ * variadic arguments go elsewhere (abi->krfixed), a call without a
+ * prototype is one with fixed arguments of the types given, except to
+ * the variadic functions of the C library (abi_libvariadic).
  */
 static char *emitcall(Node p) {
 	Type fty = p->syms[0]->type, rty = freturn(fty);
@@ -972,8 +1017,11 @@ static char *emitcall(Node p) {
 		} else
 			res->attr = sretstr(rty);
 	}
-	if (fty->u.f.proto == NULL || fty->u.f.oldstyle)
-		nfixed = 0;
+	if (fty->u.f.proto == NULL || fty->u.f.oldstyle) {
+		nfixed = tg->abi->krfixed ? -1 : 0;
+		if (nfixed < 0 && specific(p->kids[0]->op) == ADDRG+P)
+			nfixed = abi_libvariadic(p->kids[0]->syms[0]->name);
+	}
 	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
@@ -992,9 +1040,12 @@ static char *emitcall(Node p) {
 		struct part *part;
 		int j, n = 0;
 		a->fixed = nfixed < 0 || i < nfixed;
-		if (a->sty == NULL)
+		r.va = !a->fixed;
+		if (a->sty == NULL) {
 			(*tg->abi->scalar)(a->type, &r);
-		else if ((n = (*tg->abi->arg)(a->sty, &r, &part)) == ABYVAL) {
+			if (*extattr(a->type))
+				a->attr = extattr(a->type) + 1;
+		} else if ((n = (*tg->abi->arg)(a->sty, &r, &part)) == ABYVAL) {
 			a->type = "ptr";
 			a->attr = byvalstr(a->sty);
 		} else if (n == ABYREF) {
@@ -1028,7 +1079,7 @@ static char *emitcall(Node p) {
 	startline();
 	if (v)
 		print("%s = ", v);
-	print("call %s (", rt);
+	print("call%s %s (", narrow ? "" : extattr(rt), rt);
 	for (i = 0, a = list; a && a->fixed; i++, a = a->link)
 		print("%s%s", i ? ", " : "", a->type);
 	if (nfixed >= 0)
@@ -1400,7 +1451,8 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	rettype = rettypestr(f->type);
 	fname = gname(f);
 
-	print("\ndefine %s%s %s(", f->sclass == STATIC ? "internal " : "",
+	print("\ndefine %s%s%s %s(", f->sclass == STATIC ? "internal " : "",
+		*extattr(rettype) ? stringf("%s ", extattr(rettype) + 1) : "",
 		rettype, fname);
 	(*tg->abi->init)(&r);
 	nres = isstruct(freturn(f->type)) ? (*tg->abi->ret)(freturn(f->type), &rpart) : 0;
@@ -1413,7 +1465,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 			print("ptr %s %%a0", sretstr(freturn(f->type)));
 			(*tg->abi->scalar)("ptr", &r);
 		} else if (!isstruct(ty)) {
-			print("%s %%a%d", typestr(ty), i);
+			print("%s%s %%a%d", typestr(ty), extattr(typestr(ty)), i);
 			(*tg->abi->scalar)(typestr(ty), &r);
 		} else if ((n = (*tg->abi->arg)(ty, &r, &part)) == ABYVAL)
 			print("ptr %s %%a%d", byvalstr(ty), i);
@@ -1532,7 +1584,9 @@ static void I(import)(Symbol p) {
 		struct regs r;
 		struct part rpart, *part;
 		int i, j, k, n = 0;
-		print("declare %s %s(", rettypestr(p->type), p->x.name);
+		print("declare %s%s%s %s(", *extattr(rettypestr(p->type))
+			? extattr(rettypestr(p->type)) + 1 : "",
+			*extattr(rettypestr(p->type)) ? " " : "", rettypestr(p->type), p->x.name);
 		(*tg->abi->init)(&r);
 		if (isstruct(freturn(p->type)) && !(*tg->abi->ret)(freturn(p->type), &rpart)) {
 			print("ptr %s", sretstr(freturn(p->type)));	/* the result address */
@@ -1542,7 +1596,8 @@ static void I(import)(Symbol p) {
 		if (proto && !p->type->u.f.oldstyle) {
 			for (i = 0; proto[i] && proto[i] != voidtype; i++)
 				if (!isstruct(proto[i])) {
-					print("%s%s", n++ ? ", " : "", argtypestr(proto[i]));
+					print("%s%s%s", n++ ? ", " : "", argtypestr(proto[i]),
+						extattr(argtypestr(proto[i])));
 					(*tg->abi->scalar)(argtypestr(proto[i]), &r);
 				} else if ((k = (*tg->abi->arg)(proto[i], &r, &part)) == ABYVAL)
 					print("%sptr %s", n++ ? ", " : "", byvalstr(proto[i]));

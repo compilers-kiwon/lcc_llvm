@@ -60,6 +60,7 @@ static char *fltname(Type ty) {
 
 static void initregs(struct regs *r) {
 	r->gp = r->fp = 8;
+	r->va = 0;
 }
 
 /* scalar - LLVM assigns registers to scalars itself */

@@ -32,6 +32,24 @@ void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t) {
 }
 
 /*
+ * abi_libvariadic - the number of fixed parameters of the C library's
+ * variadic function named name, or -1.  A call to one without a
+ * prototype passes the rest as variadic arguments, as clang does,
+ * though C89 leaves it undefined.
+ */
+int abi_libvariadic(char *name) {
+	static struct { char *name; int nfixed; } fns[] = {
+		{ "printf", 1 }, { "fprintf", 2 }, { "sprintf", 2 },
+		{ "scanf", 1 }, { "fscanf", 2 }, { "sscanf", 2 }, { NULL, 0 } };
+	int i;
+
+	for (i = 0; fns[i].name; i++)
+		if (strcmp(name, fns[i].name) == 0)
+			return fns[i].nfixed;
+	return -1;
+}
+
+/*
  * abi_returnstwice - whether the function named name can return twice,
  * as setjmp does; LLVM must know, since locals may change between the
  * returns.  The names are those that clang knows.

@@ -1,12 +1,13 @@
 /*
  * The calling conventions of the llvm and mlir back ends, and data
- * formats they share; see sysv.c and aapcs64.c.  Types are named by
+ * formats they share; see sysv.c, aapcs64.c and riscv.c.  Types are named by
  * their LLVM names: "float", "double", "fp128", "x86_fp80", "iN", "ptr".
  */
 
 /* free argument registers while arguments are assigned to them */
 struct regs {
 	int gp, fp;
+	int va;		/* the next arguments are variadic ones */
 };
 
 /*
@@ -45,9 +46,15 @@ struct abi {
 	int (*ret)(Type ty, struct part *part);
 	/* needsslot - whether a va_arg of type ty needs a place for its value */
 	int (*needsslot)(Type ty);
+	/* extattr - the extension attribute of a scalar argument or result
+	   of LLVM type t, or NULL; NULL if there are none */
+	char *(*extattr)(char *t);
+	/* krfixed - a call without a prototype passes its arguments as
+	   fixed ones, not as variadic ones */
+	int krfixed;
 };
 
-extern struct abi sysvabi, aapcs64abi;
+extern struct abi sysvabi, aapcs64abi, riscv64abi;
 
 /* abi_memtype - the LLVM type element e is loaded and stored as */
 extern char *abi_memtype(struct elem *e);
@@ -62,6 +69,7 @@ extern void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t
 #define abi_isagg(p) ((p)->type[0] == '[' || (p)->type[0] == '{')
 
 extern int abi_returnstwice(char *);
+extern int abi_libvariadic(char *);
 extern int aapcs64_hfa(Type, Type *);
 
 extern void abi_fp128bits(Quad, unsigned long [4]);
