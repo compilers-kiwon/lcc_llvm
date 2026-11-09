@@ -20,7 +20,10 @@ xx(aarch64_linux, "aarch64-unknown-linux-gnu", \
 	"fp128", "f128", 8, 16, 8, 1, 1, &aapcs64abi) \
 xx(riscv64_linux, "riscv64-unknown-linux-gnu", \
 	"e-m:e-p:64:64-i64:64-i128:128-n32:64-S128", \
-	"fp128", "f128", 8, 16, 8, 1, 1, &riscv64abi)
+	"fp128", "f128", 8, 16, 8, 1, 1, &riscv64abi) \
+xx(armhf_linux, "armv7-unknown-linux-gnueabihf", \
+	"e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64", \
+	"double", "f64", 4, 8, 4, 1, 0, &armabi)
 
 /* a target, as a back end looks it up from IR */
 struct target {

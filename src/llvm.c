@@ -206,7 +206,7 @@ static char *argtypestr(Type ty) {
 /* byvalstr - attributes of a pointer to the structure ty on the stack */
 static char *byvalstr(Type ty) {
 	return stringf("byval([%d x i8]) align %d", ty->size,
-		ty->align < 8 ? 8 : ty->align);
+		ty->align < tg->abi->byvalalign ? tg->abi->byvalalign : ty->align);
 }
 
 /* sretstr - attributes of the address of the structure result ty */
@@ -296,7 +296,7 @@ static char *rettypestr(Type fty) {
 
 	if (isstruct(rty)) {
 		struct part part;
-		return (*tg->abi->ret)(rty, &part) ? part.type : "void";
+		return (*tg->abi->ret)(rty, variadic(fty), &part) ? part.type : "void";
 	}
 	if (isint(rty) || isenum(rty))
 		rty = promote(rty);
@@ -630,7 +630,7 @@ static char *vaaddr64(char *ap, Type ty, char *slot) {
 	int chk, reg, mem, done;
 	char *offp, *offs, *c, *next, *topp, *top, *off64, *ra, *stk, *stk2, *a;
 
-	if (isstruct(ty) && (n = aapcs64_hfa(ty, &base)) > 0)
+	if (isstruct(ty) && (n = abi_hfa(ty, &base)) > 0)
 		gp = 0, nreg = n;
 	else if (isstruct(ty) && ty->size > 16)
 		byref = 1, align = 8;
@@ -711,24 +711,27 @@ static char *vaaddr64(char *ap, Type ty, char *slot) {
 }
 
 /*
- * vaaddrptr - emit the va_arg of RISC-V for an argument of type ty, and
- * return its address.  The va_list ap is a pointer to the next argument
- * in memory, where the callee has stored the argument registers next to
- * the arguments on the stack; each takes a multiple of 8 bytes, those
- * aligned to 16 start at a multiple of 16, and a structure of more than
- * 16 bytes is passed by the address of a copy.
+ * vaaddrptr - emit the va_arg of RISC-V or ARM for an argument of type
+ * ty, and return its address.  The va_list ap is a pointer to the next
+ * argument in memory, where the callee has stored the argument
+ * registers next to the arguments on the stack; each takes a multiple
+ * of unit bytes, and starts at a multiple of its alignment if that is
+ * more.  A structure of more than byref bytes, if byref is not 0, is
+ * passed by the address of a copy (RISC-V: unit 8, byref 16; ARM: unit
+ * 4, byref 0).
  */
-static char *vaaddrptr(char *ap, Type ty) {
-	int byref = isstruct(ty) && ty->size > 16;
-	int size = byref ? 8 : roundup(ty->size, 8);
+static char *vaaddrptr(char *ap, Type ty, int unit, int byref) {
+	int size, align = ty->align;
 	char *p = newreg(), *next = newreg();
 
+	byref = byref && isstruct(ty) && ty->size > byref;
+	size = byref ? unit : roundup(ty->size, unit);
 	inst("%s = load ptr, ptr %s", p, ap);
-	if (!byref && ty->align > 8) {
+	if (!byref && align > unit) {
 		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
 		inst("%s = ptrtoint ptr %s to i64", x, p);
-		inst("%s = add i64 %s, 15", y, x);
-		inst("%s = and i64 %s, -16", z, y);
+		inst("%s = add i64 %s, %d", y, x, align - 1);
+		inst("%s = and i64 %s, %d", z, y, -align);
 		inst("%s = inttoptr i64 %s to ptr", w, z);
 		p = w;
 	}
@@ -777,7 +780,9 @@ static char *emitbuiltin(Node p, int b) {
 	if (tg->abi == &aapcs64abi)
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
 	else if (tg->abi == &riscv64abi)
-		v = vaaddrptr(ap, ty);
+		v = vaaddrptr(ap, ty, 8, 16);
+	else if (tg->abi == &armabi)
+		v = vaaddrptr(ap, ty, 4, 0);
 	else
 		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* float */
@@ -1009,15 +1014,6 @@ static char *emitcall(Node p) {
 
 	if ((i = builtin(p)) != 0)
 		return emitbuiltin(p, i);
-	if (isstruct(rty)) {	/* args has its address first */
-		assert(args && args->type && strcmp(args->type, "ptr") == 0);
-		res = args;
-		if ((nres = (*tg->abi->ret)(rty, &rpart)) > 0) {
-			args = args->link;
-			rt = rettypestr(fty);
-		} else
-			res->attr = sretstr(rty);
-	}
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle) {
 		nfixed = tg->abi->krfixed ? -1 : 0;
 		if (nfixed < 0 && specific(p->kids[0]->op) == ADDRG+P)
@@ -1026,6 +1022,15 @@ static char *emitcall(Node p) {
 	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
+	if (isstruct(rty)) {	/* args has its address first */
+		assert(args && args->type && strcmp(args->type, "ptr") == 0);
+		res = args;
+		if ((nres = (*tg->abi->ret)(rty, nfixed >= 0, &rpart)) > 0) {
+			args = args->link;
+			rt = rpart.type;
+		} else
+			res->attr = sretstr(rty);
+	}
 	if (nfixed >= 0 && nres == 0 && isstruct(rty))
 		nfixed++;	/* the result address is fixed: sret is not allowed in ... */
 	if (optype(p->op) != V && (isint(rty) || isenum(rty))
@@ -1036,6 +1041,7 @@ static char *emitcall(Node p) {
 	}
 	/* pass structures in registers, on the stack or by address */
 	(*tg->abi->init)(&r);
+	r.vfunc = nfixed >= 0;
 	for (i = 0, a = args; a; i++, a = a->link) {
 		struct arg *b;
 		struct part *part;
@@ -1458,7 +1464,9 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		*extattr(rettype) ? stringf("%s ", extattr(rettype) + 1) : "",
 		rettype, fname);
 	(*tg->abi->init)(&r);
-	nres = isstruct(freturn(f->type)) ? (*tg->abi->ret)(freturn(f->type), &rpart) : 0;
+	r.vfunc = variadic(f->type);
+	nres = isstruct(freturn(f->type))
+		? (*tg->abi->ret)(freturn(f->type), r.vfunc, &rpart) : 0;
 	for (i = nres > 0, np = 0; caller[i]; i++) {
 		Type ty = caller[i]->type;
 		struct part *part;
@@ -1484,6 +1492,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	if (strcmp(rettype, "void") != 0)
 		inst("%%retval = alloca %s", rettype);
 	(*tg->abi->init)(&r);
+	r.vfunc = variadic(f->type);
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
 		struct part *part;
@@ -1592,7 +1601,9 @@ static void I(import)(Symbol p) {
 			? extattr(rettypestr(p->type)) + 1 : "",
 			*extattr(rettypestr(p->type)) ? " " : "", rettypestr(p->type), p->x.name);
 		(*tg->abi->init)(&r);
-		if (isstruct(freturn(p->type)) && !(*tg->abi->ret)(freturn(p->type), &rpart)) {
+		r.vfunc = variadic(p->type);
+		if (isstruct(freturn(p->type))
+		&& !(*tg->abi->ret)(freturn(p->type), r.vfunc, &rpart)) {
 			print("ptr %s", sretstr(freturn(p->type)));	/* the result address */
 			n++;
 			(*tg->abi->scalar)("ptr", &r);

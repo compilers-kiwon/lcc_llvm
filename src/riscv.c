@@ -86,7 +86,7 @@ static char *leaftype(struct leaf *l) {
 
 static void initregs(struct regs *r) {
 	r->gp = r->fp = 8;
-	r->va = 0;
+	r->va = r->vfunc = 0;
 }
 
 static void takegp(struct regs *r, int n) {
@@ -143,7 +143,7 @@ static int arg(Type ty, struct regs *r, struct part **part) {
 	return 1;
 }
 
-static int ret(Type ty, struct part *part) {
+static int ret(Type ty, int vfunc, struct part *part) {
 	struct leaf l[2];
 	int i, n;
 
@@ -175,4 +175,4 @@ static char *extattr(char *t) {
 	return strcmp(t, "i32") == 0 ? "signext" : NULL;
 }
 
-struct abi riscv64abi = { initregs, scalar, arg, ret, needsslot, extattr, 1 };
+struct abi riscv64abi = { initregs, scalar, arg, ret, needsslot, extattr, 1, 0, 1, 8 };

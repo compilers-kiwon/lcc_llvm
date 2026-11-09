@@ -31,6 +31,43 @@ void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t) {
 	p->type = n == 1 ? t : stringf("[%d x %s]", n, t);
 }
 
+/* hfa - whether the scalars of ty are all floats of the same size as *base,
+   which is set to the first */
+static int hfa(Type ty, Type *base) {
+	ty = unqual(ty);
+	if (isstruct(ty)) {
+		Field f;
+		for (f = ty->u.sym->u.s.flist; f; f = f->link)
+			if (f->lsb || !hfa(f->type, base))
+				return 0;
+		return 1;
+	}
+	if (isarray(ty))
+		return hfa(ty->type, base);
+	if (!isfloat(ty))
+		return 0;
+	if (*base == NULL)
+		*base = ty;
+	return (*base)->size == ty->size;
+}
+
+/*
+ * abi_hfa - how many elements of type *base the homogeneous floating
+ * point aggregate ty has, or 0: a structure or union of one to four
+ * floats, doubles or long doubles of the same type, in nested ones and
+ * arrays too (AAPCS64, AAPCS-VFP)
+ */
+int abi_hfa(Type ty, Type *base) {
+	int n;
+
+	ty = unqual(ty);
+	*base = NULL;
+	if (!isstruct(ty) || ty->size == 0 || !hfa(ty, base) || *base == NULL)
+		return 0;
+	n = ty->size/(*base)->size;
+	return n <= 4 && n*(*base)->size == ty->size ? n : 0;
+}
+
 /*
  * abi_varalign - the alignment of the variable p: that of its type, or
  * more for a large array (SysV x86-64 aligns those of at least 16

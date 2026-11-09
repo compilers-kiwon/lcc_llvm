@@ -1,6 +1,6 @@
 /*
  * The calling conventions of the llvm and mlir back ends, and data
- * formats they share; see sysv.c, aapcs64.c and riscv.c.  Types are named by
+ * formats they share; see sysv.c, aapcs64.c, riscv.c and arm.c.  Types are named by
  * their LLVM names: "float", "double", "fp128", "x86_fp80", "iN", "ptr".
  */
 
@@ -8,6 +8,7 @@
 struct regs {
 	int gp, fp;
 	int va;		/* the next arguments are variadic ones */
+	int vfunc;	/* the function is variadic */
 };
 
 /*
@@ -41,9 +42,10 @@ struct abi {
 	/* arg - set *part to the parts of the structure argument ty, taking
 	   registers from r, and return how many, or ABYVAL or ABYREF */
 	int (*arg)(Type ty, struct regs *r, struct part **part);
-	/* ret - set *part to the structure result ty and return 1, or
-	   return 0 if it is returned at an address the caller passes (sret) */
-	int (*ret)(Type ty, struct part *part);
+	/* ret - set *part to the structure result ty of a function, variadic
+	   if vfunc, and return 1, or return 0 if it is returned at an
+	   address the caller passes (sret) */
+	int (*ret)(Type ty, int vfunc, struct part *part);
 	/* needsslot - whether a va_arg of type ty needs a place for its value */
 	int (*needsslot)(Type ty);
 	/* extattr - the extension attribute of a scalar argument or result
@@ -55,9 +57,13 @@ struct abi {
 	/* arrayalign - the least alignment of an array variable of at least
 	   so many bytes, or 0 */
 	int arrayalign;
+	/* narrowext - a char or short result is extended to int by the callee */
+	int narrowext;
+	/* byvalalign - the least alignment of a structure argument on the stack */
+	int byvalalign;
 };
 
-extern struct abi sysvabi, aapcs64abi, riscv64abi;
+extern struct abi sysvabi, aapcs64abi, riscv64abi, armabi;
 
 /* abi_memtype - the LLVM type element e is loaded and stored as */
 extern char *abi_memtype(struct elem *e);
@@ -74,7 +80,7 @@ extern void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t
 extern int abi_returnstwice(char *);
 extern int abi_libvariadic(char *);
 extern int abi_varalign(struct abi *, Symbol);
-extern int aapcs64_hfa(Type, Type *);
+extern int abi_hfa(Type, Type *);
 
 extern void abi_fp128bits(Quad, unsigned long [4]);
 

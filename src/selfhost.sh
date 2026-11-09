@@ -7,7 +7,8 @@
 # the host compiler (stage 1), as by make BUILDDIR=builddir
 # HOSTFILE=etc/llvm-TARGET.c all (etc/mlir-TARGET.c) with
 # include/llvm/TARGET/*.h in builddir/include; TARGET is x86_64-linux, or
-# aarch64-linux or riscv64-linux, whose stage 1 is a cross compiler.  Stage 2 is this
+# aarch64-linux, riscv64-linux or armhf-linux, whose stage 1 is a cross
+# compiler.  Stage 2 is this
 # repository built by the stage 1 lcc in outdir/2, and stage 3 is built by
 # the stage 2 lcc in outdir/3; outdir is builddir/selfhost by default.
 #
@@ -22,11 +23,12 @@
 # The exit status is 0 only if stages 2 and 3 agree.  To run the tests with
 # stage 2, pass outdir/2 to run-llvm.sh -b.
 #
-# For aarch64-linux and riscv64-linux, stages 2 and 3 are programs of the
+# For the other targets, stages 2 and 3 are programs of the
 # target, which run with qemu through binfmt_misc (the build runs their
 # lburg, and stage 3 is built by stage 2); QEMU_LD_PREFIX gives qemu the
-# target's libraries.  The long double of stage 2 is IEEE quad, so stages
-# 1 and 2 may differ where constants of type double are folded.
+# target's libraries.  The long double of stage 2 is IEEE quad, or double
+# on armhf, so stages 1 and 2 may differ where constants of type double
+# are folded.
 
 cd `dirname $0`/.. || exit 1
 
@@ -60,6 +62,9 @@ case $X in
 x86_64-linux) ;;
 aarch64-linux|riscv64-linux)
 	QEMU_LD_PREFIX=/usr/`echo $X | sed 's/-linux$//'`-linux-gnu
+	export QEMU_LD_PREFIX ;;
+armhf-linux)
+	QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
 	export QEMU_LD_PREFIX ;;
 *)	echo "$0: unknown target $X" 1>&2; exit 2 ;;
 esac

@@ -201,7 +201,7 @@ void sysv_fp80bits(long double d, unsigned *se, unsigned long *hi, unsigned long
 static void initregs(struct regs *r) {
 	r->gp = 6;
 	r->fp = 8;
-	r->va = 0;
+	r->va = r->vfunc = 0;
 }
 
 /* arg - the parts of sysv_structparts, one element each */
@@ -218,7 +218,7 @@ static int arg(Type ty, struct regs *r, struct part **part) {
 }
 
 /* ret - the registers of retparts as one part */
-static int ret(Type ty, struct part *part) {
+static int ret(Type ty, int vfunc, struct part *part) {
 	char *t[2];
 	int i, n = retparts(ty, t);
 
@@ -236,4 +236,4 @@ static int ret(Type ty, struct part *part) {
 	return 1;
 }
 
-struct abi sysvabi = { initregs, scalarreg, arg, ret, needsslot, NULL, 0, 16 };
+struct abi sysvabi = { initregs, scalarreg, arg, ret, needsslot, NULL, 0, 16, 0, 8 };

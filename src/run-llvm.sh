@@ -4,7 +4,7 @@
 # usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
 #
 # target is that of the lcc in builddir: x86_64-linux (the default),
-# aarch64-linux or riscv64-linux, whose programs run with qemu; $TARGET
+# aarch64-linux, riscv64-linux or armhf-linux, whose programs run with qemu; $TARGET
 # too.  The lcc may be a program of that target itself (src/selfhost.sh -x).
 #
 # suites:
@@ -111,6 +111,16 @@ riscv64-linux)
 	case "$DRVCC" in
 	clang)	DRVCC="clang --target=riscv64-linux-gnu -fuse-ld=lld" ;;
 	gcc)	DRVCC=riscv64-linux-gnu-gcc ;;
+	esac ;;
+armhf-linux)
+	RUN="qemu-arm -L /usr/arm-linux-gnueabihf" NM=llvm-nm-18
+	QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
+	export QEMU_LD_PREFIX
+	# lcc's time_t and off_t have 32 bits, as clang's; Ubuntu's gcc
+	# has 64 (_TIME_BITS=64, _FILE_OFFSET_BITS=64)
+	case "$DRVCC" in
+	clang)	DRVCC="clang --target=arm-linux-gnueabihf -fuse-ld=lld" ;;
+	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -U_FILE_OFFSET_BITS" ;;
 	esac ;;
 *)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
 esac

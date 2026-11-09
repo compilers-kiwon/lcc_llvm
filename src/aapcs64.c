@@ -21,38 +21,6 @@ static char rcsid[] = "$Id$";
  * in x0 and x1; a larger one is returned at the address in x8 (sret).
  */
 
-/* hfa - whether the scalars of ty are all floats of the same size as *base,
-   which is set to the first */
-static int hfa(Type ty, Type *base) {
-	ty = unqual(ty);
-	if (isstruct(ty)) {
-		Field f;
-		for (f = ty->u.sym->u.s.flist; f; f = f->link)
-			if (f->lsb || !hfa(f->type, base))
-				return 0;
-		return 1;
-	}
-	if (isarray(ty))
-		return hfa(ty->type, base);
-	if (!isfloat(ty))
-		return 0;
-	if (*base == NULL)
-		*base = ty;
-	return (*base)->size == ty->size;
-}
-
-/* aapcs64_hfa - how many elements of type *base the HFA ty has, or 0 */
-int aapcs64_hfa(Type ty, Type *base) {
-	int n;
-
-	ty = unqual(ty);
-	*base = NULL;
-	if (!isstruct(ty) || ty->size == 0 || !hfa(ty, base) || *base == NULL)
-		return 0;
-	n = ty->size/(*base)->size;
-	return n <= 4 && n*(*base)->size == ty->size ? n : 0;
-}
-
 /* fltname - the LLVM type of the floating type ty */
 static char *fltname(Type ty) {
 	return ty->size == 4 ? "float" : ty->size == 8 ? "double" : "fp128";
@@ -60,7 +28,7 @@ static char *fltname(Type ty) {
 
 static void initregs(struct regs *r) {
 	r->gp = r->fp = 8;
-	r->va = 0;
+	r->va = r->vfunc = 0;
 }
 
 /* scalar - LLVM assigns registers to scalars itself */
@@ -73,7 +41,7 @@ static int arg(Type ty, struct regs *r, struct part **part) {
 
 	ty = unqual(ty);
 	*part = abi_parts(1);
-	if ((n = aapcs64_hfa(ty, &base)) > 0) {
+	if ((n = abi_hfa(ty, &base)) > 0) {
 		abi_elems(*part, ty, 0, n, base->size, fltname(base));
 		(*part)->type = stringf("[%d x %s]", n, fltname(base));
 		(*part)->alignstack = base->size > 8 ? 16 : 8;
@@ -88,13 +56,13 @@ static int arg(Type ty, struct regs *r, struct part **part) {
 	return 1;
 }
 
-static int ret(Type ty, struct part *part) {
+static int ret(Type ty, int vfunc, struct part *part) {
 	Type base;
 	int i, n;
 
 	ty = unqual(ty);
 	part->alignstack = 0;
-	if ((n = aapcs64_hfa(ty, &base)) > 0) {
+	if ((n = abi_hfa(ty, &base)) > 0) {
 		abi_elems(part, ty, 0, n, base->size, fltname(base));
 		part->type = "{ ";
 		for (i = 0; i < n; i++)
@@ -121,8 +89,8 @@ static int needsslot(Type ty) {
 
 	ty = unqual(ty);
 	if (isstruct(ty))
-		return aapcs64_hfa(ty, &base) > 1 && base->size < 16;
+		return abi_hfa(ty, &base) > 1 && base->size < 16;
 	return isfloat(ty) && ty->size < doubletype->size;
 }
 
-struct abi aapcs64abi = { initregs, scalar, arg, ret, needsslot };
+struct abi aapcs64abi = { initregs, scalar, arg, ret, needsslot, NULL, 0, 0, 0, 8 };

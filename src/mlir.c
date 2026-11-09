@@ -144,22 +144,23 @@ static void hexdigits(char *buf, int i, int n, unsigned long u) {
 	}
 }
 
-/* fltbits - the bits of float or double constant d of size 4 or 8, as
-   the host represents it */
-static unsigned long fltbits(long double d, int size) {
-	if (size == 4) {
-		float f = (float)d;
-		unsigned u;
-		assert(sizeof u == sizeof f);
-		memcpy(&u, &f, sizeof u);
-		return u;
-	} else {
-		double x = (double)d;
-		unsigned long u;
-		assert(sizeof u == sizeof x);
-		memcpy(&u, &x, sizeof u);
-		return u;
-	}
+/* fltbytes - set b[0..size-1] to the bytes of float or double constant
+   d of size 4 or 8, the least significant first, as the host represents
+   it; an unsigned long may have only 32 bits */
+static void fltbytes(long double d, int size, unsigned char b[]) {
+	static union { int x; char endian; } little = { 1 };
+	unsigned char t[sizeof (double)];
+	float f = (float)d;
+	double x = (double)d;
+	int i;
+
+	assert(sizeof f == 4 && sizeof x == 8);
+	if (size == 4)
+		memcpy(t, &f, sizeof f);
+	else
+		memcpy(t, &x, sizeof x);
+	for (i = 0; i < size; i++)
+		b[i] = t[little.endian ? i : size - 1 - i];
 }
 
 /* fltstr - floating constant d of size bytes as a hex literal of its
@@ -174,7 +175,11 @@ static char *fltstr(Value v, int size) {
 
 	buf[0] = '0', buf[1] = 'x';
 	if (size <= 8) {
-		hexdigits(buf, 2, 2*size, fltbits(d, size));
+		unsigned char b[8];
+		int i;
+		fltbytes(d, size, b);
+		for (i = 0; i < size; i++)
+			hexdigits(buf, 2 + 2*i, 2, b[size - 1 - i]);
 		buf[2 + 2*size] = 0;
 	} else if (IR->quadld) {
 		unsigned long w[4];
@@ -254,8 +259,8 @@ static int itembytes(Item it, unsigned char b[]) {
 	case P: u = (unsigned long)it->v.p; break;
 	case F:
 		if (it->size <= 8) {
-			u = fltbits(it->v.d, it->size);
-			break;
+			fltbytes(it->v.d, it->size, b);
+			return it->size;
 		}
 		if (IR->quadld) {
 			unsigned long w[4];
@@ -278,8 +283,12 @@ static int itembytes(Item it, unsigned char b[]) {
 		assert(0);
 		return 0;
 	}
-	for (i = 0; i < it->size; i++)
-		b[i] = u>>8*i;
+	for (i = 0; i < it->size; i++) {	/* u may have fewer bytes */
+		b[i] = i < (int)sizeof u ? u&0xFF
+			: it->suffix == I && it->v.i < 0 ? 0xFF : 0;
+		u >>= 4;
+		u >>= 4;
+	}
 	return it->size;
 }
 
@@ -998,18 +1007,17 @@ static char *extattr(char *t) {
 
 /* resstr - the result type t of function type fty, NULL if none, with
    its extension attribute: a char or short result is narrow (restypestr),
-   and extended as its type is where an int one is */
+   and extended as its type is where the callee extends it (narrowext) */
 static char *resstr(char *t, Type fty) {
 	Type rty = unqual(freturn(fty));
 	char *a;
 
-	if (t == NULL || tg->abi->extattr == NULL)
+	if (t == NULL)
 		return t;
 	if ((isint(rty) || isenum(rty)) && rty->size < inttype->size)
-		a = (*tg->abi->extattr)(typestr(inttype)) == NULL ? NULL
-			: isunsigned(rty) ? "zeroext" : "signext";
+		a = !tg->abi->narrowext ? NULL : isunsigned(rty) ? "zeroext" : "signext";
 	else
-		a = (*tg->abi->extattr)(t);
+		a = tg->abi->extattr ? (*tg->abi->extattr)(t) : NULL;
 	return a ? stringf("(%s {llvm.%s})", t, a) : t;
 }
 
@@ -1042,7 +1050,7 @@ static int elemalign(int off, int align) {
 /* byvalstr - attributes of a structure argument ty passed in memory */
 static char *byvalstr(Type ty) {
 	return stringf("{llvm.byval = !llvm.array<%d x i8>, llvm.align = %d : i64}",
-		ty->size, ty->align < 8 ? 8 : ty->align);
+		ty->size, ty->align < tg->abi->byvalalign ? tg->abi->byvalalign : ty->align);
 }
 
 /* sretstr - attributes of the address of the structure result ty */
@@ -1059,7 +1067,7 @@ static char *restypestr(Type fty) {
 	struct part part;
 
 	if (isstruct(rty))
-		return (*tg->abi->ret)(rty, &part) ? parttype(&part) : NULL;
+		return (*tg->abi->ret)(rty, variadic(fty), &part) ? parttype(&part) : NULL;
 	return rty->op == VOID ? NULL : typestr(rty);
 }
 
@@ -1200,8 +1208,9 @@ static void addparam(char **plain, char **typed, char **named, char *ty,
  * the others are %a<base+i>, or %a<base+i>.<j> for the parts of a
  * structure in registers, or else they are passed in memory (byval).
  */
-static void sigparams(Type rty, Type ty[], int n, int base, char **plain,
+static void sigparams(Type fty, Type ty[], int n, int base, char **plain,
 	char **typed, char **named) {
+	Type rty = freturn(fty);
 	struct regs r;
 	struct part rpart, *part;
 	char *t;
@@ -1209,7 +1218,8 @@ static void sigparams(Type rty, Type ty[], int n, int base, char **plain,
 
 	*plain = *typed = *named = "";
 	(*tg->abi->init)(&r);
-	if (isstruct(rty) && !(*tg->abi->ret)(rty, &rpart)) {
+	r.vfunc = variadic(fty);
+	if (isstruct(rty) && !(*tg->abi->ret)(rty, r.vfunc, &rpart)) {
 		addparam(plain, typed, named, "!llvm.ptr", sretstr(rty), "%a0");
 		(*tg->abi->scalar)("ptr", &r);
 	}
@@ -1251,7 +1261,7 @@ static int fnref(Symbol p) {
 	f->kind = FUNCFUNC;
 	for (n = 0; proto[n] && proto[n] != voidtype; n++)
 		;
-	sigparams(freturn(fty), proto, n, 0, &f->params, &f->typed, &named);
+	sigparams(fty, proto, n, 0, &f->params, &f->typed, &named);
 	f->result = restypestr(fty);
 	f->type = fntypestr(f->params, f->result);
 	return f->kind;
@@ -1452,27 +1462,30 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 
 /*
  * vaaddrptr - emit the address of the next argument of type ty in
- * va_list ap, and step ap past it, as RISC-V does: ap points to the
- * next argument in memory, where the callee has stored the argument
+ * va_list ap, and step ap past it, as RISC-V and ARM do: ap points to
+ * the next argument in memory, where the callee has stored the argument
  * registers next to the arguments on the stack; each takes a multiple
- * of 8 bytes, those aligned to 16 start at a multiple of 16, and a
- * structure of more than 16 bytes is passed by the address of a copy.
+ * of unit bytes, and starts at a multiple of its alignment if that is
+ * more.  A structure of more than byref bytes, if byref is not 0, is
+ * passed by the address of a copy (RISC-V: unit 8, byref 16; ARM: unit
+ * 4, byref 0).
  */
-static char *vaaddrptr(char *ap, Type ty) {
-	int byref = isstruct(ty) && ty->size > 16;
+static char *vaaddrptr(char *ap, Type ty, int unit, int byref) {
+	int align = ty->align;
 	char *p = newreg();
 
+	byref = byref && isstruct(ty) && ty->size > byref;
 	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", p, ap);
-	if (!byref && ty->align > 8) {	/* round up to 16 */
+	if (!byref && align > unit) {	/* round up to the alignment */
 		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
 		inst("%s = llvm.ptrtoint %s : !llvm.ptr to i64", x, p);
-		inst("%s = arith.addi %s, %s : i64", y, x, iconst(15, "i64"));
-		inst("%s = arith.andi %s, %s : i64", z, y, iconst(-16, "i64"));
+		inst("%s = arith.addi %s, %s : i64", y, x, iconst(align - 1, "i64"));
+		inst("%s = arith.andi %s, %s : i64", z, y, iconst(-align, "i64"));
 		inst("%s = llvm.inttoptr %s : i64 to !llvm.ptr", w, z);
 		p = w;
 	}
 	inst("llvm.store %s, %s : !llvm.ptr, !llvm.ptr",
-		gepconst(p, byref ? 8 : roundup(ty->size, 8)), ap);
+		gepconst(p, byref ? unit : roundup(ty->size, unit)), ap);
 	if (byref) {
 		char *q = newreg();
 		inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", q, p);
@@ -1499,7 +1512,7 @@ static char *vaaddr64(char *ap, Type ty, char *slot) {
 	char *offp, *offs, *c, *next, *top, *off64, *ra, *stk, *a;
 	char *chk, *reg, *mem, *done;
 
-	if (isstruct(ty) && (n = aapcs64_hfa(ty, &base)) > 0)
+	if (isstruct(ty) && (n = abi_hfa(ty, &base)) > 0)
 		gp = 0, nreg = n;
 	else if (isstruct(ty) && ty->size > 16)
 		byref = 1, align = 8;
@@ -1638,7 +1651,9 @@ static char *emitbuiltin(Node p, int b) {
 	if (tg->abi == &aapcs64abi)
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
 	else if (tg->abi == &riscv64abi)
-		v = vaaddrptr(ap, ty);
+		v = vaaddrptr(ap, ty, 8, 16);
+	else if (tg->abi == &armabi)
+		v = vaaddrptr(ap, ty, 4, 0);
 	else
 		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* a float, which came as a double */
@@ -1676,15 +1691,6 @@ static char *emitcall(Node p) {
 
 	if ((i = builtin(p)) != 0)
 		return emitbuiltin(p, i);
-	if (isstruct(rty)) {	/* args has its address first */
-		assert(args && args->type && strcmp(args->type, "!llvm.ptr") == 0);
-		res = args;
-		if ((nres = (*tg->abi->ret)(rty, &rpart)) > 0) {
-			args = args->link;
-			rt = restypestr(fty);
-		} else
-			res->attr = sretstr(rty);
-	}
 	if (fty->u.f.proto == NULL || fty->u.f.oldstyle) {
 		nfixed = tg->abi->krfixed ? -1 : 0;
 		if (nfixed < 0 && specific(p->kids[0]->op) == ADDRG+P)
@@ -1693,6 +1699,15 @@ static char *emitcall(Node p) {
 	else if (variadic(fty))
 		for (nfixed = 0; fty->u.f.proto[nfixed + 1]; nfixed++)
 			;	/* proto ends with voidtype for ... */
+	if (isstruct(rty)) {	/* args has its address first */
+		assert(args && args->type && strcmp(args->type, "!llvm.ptr") == 0);
+		res = args;
+		if ((nres = (*tg->abi->ret)(rty, nfixed >= 0, &rpart)) > 0) {
+			args = args->link;
+			rt = parttype(&rpart);
+		} else
+			res->attr = sretstr(rty);
+	}
 	if (nfixed >= 0 && nres == 0 && isstruct(rty))
 		nfixed++;	/* the result address is fixed: sret is not allowed in ... */
 	if (rt && (isint(rty) || isenum(rty)) && rty->size < opsize(p->op)) {
@@ -1701,6 +1716,7 @@ static char *emitcall(Node p) {
 	}
 	/* pass structures in registers, in memory or by address */
 	(*tg->abi->init)(&r);
+	r.vfunc = nfixed >= 0;
 	for (i = 0, a = args; a; i++, a = a->link) {
 		a->fixed = nfixed < 0 || i < nfixed;
 		r.va = !a->fixed;
@@ -2200,13 +2216,13 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	rettype = rettypestr(f->type);
 	restype = restypestr(f->type);
 	if (isstruct(rty))
-		nres = (*tg->abi->ret)(rty, &rpart);
+		nres = (*tg->abi->ret)(rty, variadic(f->type), &rpart);
 	for (n = 0; caller[n]; n++)
 		;
 	ty = newarray(n + 1, sizeof *ty, FUNC);
 	for (i = 0; i < n; i++)
 		ty[i] = caller[i]->type;
-	sigparams(rty, ty + base, n - base, base, &plain, &typed, &named);
+	sigparams(f->type, ty + base, n - base, base, &plain, &typed, &named);
 	fi = fninfo(f);
 	if (fi->kind == UNDECIDED) {
 		fi->kind = variadic(f->type) || llvmfunc ? LLVMFUNC : FUNCFUNC;
@@ -2256,6 +2272,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 		pinst("%%retval = llvm.alloca %s x %s : (i32) -> !llvm.ptr",
 			iconst(1, "i32"), rettype);
 	(*tg->abi->init)(&r);
+	r.vfunc = variadic(f->type);
 	for (i = 0; caller[i]; i++) {
 		Symbol p = caller[i], q = callee[i];
 		if (i == 0 && nres > 0) {	/* the result goes in %retval */
@@ -2363,7 +2380,7 @@ static void I(import)(Symbol p) {
 			if (proto && !fty->u.f.oldstyle)
 				for ( ; proto[n] && proto[n] != voidtype; n++)
 					;
-			sigparams(freturn(fty), proto, n, 0, &plain, &typed, &named);
+			sigparams(fty, proto, n, 0, &plain, &typed, &named);
 			fprint(module, "llvm.func @\"%s\"(%s", gname(p), typed);
 			if (proto == NULL || fty->u.f.oldstyle || variadic(fty))
 				fprint(module, "%s...", *typed ? ", " : "");
