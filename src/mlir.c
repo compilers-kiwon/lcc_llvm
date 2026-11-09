@@ -163,10 +163,11 @@ static unsigned long fltbits(long double d, int size) {
 }
 
 /* fltstr - floating constant d of size bytes as a hex literal of its
-   bits, which MLIR takes exactly: 8 or 16 hex digits, or for the x87
-   80 bits 4 of the sign and the exponent and 16 of the significand */
+   bits, which MLIR takes exactly: 8 or 16 hex digits, for the x87
+   80 bits 4 of the sign and the exponent and 16 of the significand, and
+   for IEEE quad 32 */
 static char *fltstr(long double d, int size) {
-	char buf[23];
+	char buf[35];
 	unsigned se;
 	unsigned long hi, lo;
 
@@ -174,6 +175,13 @@ static char *fltstr(long double d, int size) {
 	if (size <= 8) {
 		hexdigits(buf, 2, 2*size, fltbits(d, size));
 		buf[2 + 2*size] = 0;
+	} else if (strcmp(tg->ldtype, "fp128") == 0) {
+		unsigned long w[4];
+		int i;
+		abi_fp128bits(d, w);
+		for (i = 0; i < 4; i++)
+			hexdigits(buf, 2 + 8*i, 8, w[i]);
+		buf[34] = 0;
 	} else {
 		sysv_fp80bits(d, &se, &hi, &lo);
 		hexdigits(buf, 2, 4, se);
@@ -247,6 +255,13 @@ static int itembytes(Item it, unsigned char b[]) {
 		if (it->size <= 8) {
 			u = fltbits(it->v.d, it->size);
 			break;
+		}
+		if (strcmp(tg->ldtype, "fp128") == 0) {
+			unsigned long w[4];
+			abi_fp128bits(it->v.d, w);
+			for (i = 0; i < 16; i++)
+				b[i] = w[3 - i/4]>>8*(i%4);
+			return it->size;
 		}
 		sysv_fp80bits(it->v.d, &se, &hi, &lo);
 		for (i = 0; i < 4; i++) {
@@ -1410,6 +1425,100 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 }
 
 /*
+ * vaaddr64 - emit the address of the next argument of type ty in va_list
+ * ap, and step ap past it, as AAPCS64 does.  ap has __stack at 0,
+ * __gr_top at 8, __vr_top at 16, __gr_offs at 24 and __vr_offs at 28;
+ * an offset is negative while registers are left, and counts up to 0
+ * from the top of its save area, 8 bytes for each general register and
+ * 16 for each SIMD register.  An argument is in registers if all it
+ * needs are left, else on the stack.  The elements of an HFA of floats
+ * or doubles in registers are copied to slot, which is then its
+ * address; a structure of more than 16 bytes is passed by the address
+ * of a copy.
+ */
+static char *vaaddr64(char *ap, Type ty, char *slot) {
+	Type base = NULL;
+	int n, gp = 1, nreg = 1, byref = 0, size, align = ty->align, i;
+	char *offp, *offs, *c, *next, *top, *off64, *ra, *stk, *a;
+	char *chk, *reg, *mem, *done;
+
+	if (isstruct(ty) && (n = aapcs64_hfa(ty, &base)) > 0)
+		gp = 0, nreg = n;
+	else if (isstruct(ty) && ty->size > 16)
+		byref = 1, align = 8;
+	else if (isstruct(ty))
+		nreg = (ty->size + 7)/8;
+	else if (isfloat(ty))
+		gp = 0;
+	size = byref ? 8 : roundup(ty->size, 8);
+	chk = stringf("b%d", ++nblock);
+	reg = stringf("b%d", ++nblock);
+	mem = stringf("b%d", ++nblock);
+	done = stringf("b%d", ++nblock);
+	offp = gepconst(ap, gp ? 24 : 28);
+	offs = newreg();
+	inst("%s = llvm.load %s : !llvm.ptr -> i32", offs, offp);
+	c = newreg();
+	inst("%s = arith.cmpi sge, %s, %s : i32", c, offs, iconst(0, "i32"));
+	condbr(c, mem, chk);
+	startblock(chk, NULL);
+	if (gp && align > 8) {	/* an even pair of registers */
+		char *x = newreg(), *y = newreg();
+		inst("%s = arith.addi %s, %s : i32", x, offs, iconst(15, "i32"));
+		inst("%s = arith.andi %s, %s : i32", y, x, iconst(-16, "i32"));
+		offs = y;
+	}
+	next = newreg();
+	inst("%s = arith.addi %s, %s : i32", next, offs,
+		iconst(gp ? 8*nreg : 16*nreg, "i32"));
+	inst("llvm.store %s, %s : i32, !llvm.ptr", next, offp);
+	c = newreg();
+	inst("%s = arith.cmpi sgt, %s, %s : i32", c, next, iconst(0, "i32"));
+	condbr(c, mem, reg);
+	startblock(reg, NULL);
+	top = newreg();
+	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", top, gepconst(ap, gp ? 8 : 16));
+	off64 = newreg();
+	inst("%s = arith.extsi %s : i32 to i64", off64, offs);
+	ra = newreg();
+	inst("%s = llvm.getelementptr %s[%s] : (!llvm.ptr, i64) -> !llvm.ptr, i8",
+		ra, top, off64);
+	if (slot && isstruct(ty)) {	/* gather the elements */
+		char *t = base->size == 4 ? "f32" : "f64";
+		for (i = 0; i < nreg; i++) {
+			char *src = gepconst(ra, 16*i), *dst, *v;
+			dst = gepconst(slot, i*base->size);
+			v = newreg();
+			inst("%s = llvm.load %s : !llvm.ptr -> %s", v, src, t);
+			inst("llvm.store %s, %s : %s, !llvm.ptr", v, dst, t);
+		}
+		ra = slot;
+	}
+	br(done, stringf("%s : !llvm.ptr", ra));
+	startblock(mem, NULL);
+	stk = newreg();
+	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", stk, ap);
+	if (align > 8) {	/* round up to 16 */
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = llvm.ptrtoint %s : !llvm.ptr to i64", x, stk);
+		inst("%s = arith.addi %s, %s : i64", y, x, iconst(15, "i64"));
+		inst("%s = arith.andi %s, %s : i64", z, y, iconst(-16, "i64"));
+		inst("%s = llvm.inttoptr %s : i64 to !llvm.ptr", w, z);
+		stk = w;
+	}
+	inst("llvm.store %s, %s : !llvm.ptr, !llvm.ptr", gepconst(stk, size), ap);
+	br(done, stringf("%s : !llvm.ptr", stk));
+	a = newreg();
+	startblock(done, stringf("%s: !llvm.ptr", a));
+	if (byref) {
+		char *p = newreg();
+		inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", p, a);
+		a = p;
+	}
+	return a;
+}
+
+/*
  * builtin - which stdarg function the call p is to, or 0.  stdarg.h
  * declares __builtin_va_start and __builtin_va_end, and the front end
  * makes __builtin_va_arg(ap, T) a call to a __builtin_va_arg returning
@@ -1469,7 +1578,10 @@ static char *emitbuiltin(Node p, int b) {
 		pinst("%s = llvm.alloca %s x %s {alignment = %d : i64} : (i32) -> !llvm.ptr",
 			slot, iconst(1, "i32"), typestr(ty), ty->align);
 	}
-	v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
+	if (tg->abi == &aapcs64abi)
+		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
+	else
+		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* a float, which came as a double */
 		d = newreg();
 		inst("%s = llvm.load %s : !llvm.ptr -> f64", d, v);

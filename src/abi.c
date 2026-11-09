@@ -3,7 +3,7 @@
 
 static char rcsid[] = "$Id$";
 
-/* What the calling conventions share. */
+/* What the calling conventions in sysv.c and aapcs64.c share. */
 
 char *abi_memtype(struct elem *e) {
 	if (e->type[0] == 'i' && atoi(e->type + 1) > 8*e->size)
@@ -47,3 +47,19 @@ int abi_returnstwice(char *name) {
 	return 0;
 }
 
+/*
+ * abi_fp128bits - the IEEE quad form of d in w[0..3], 32 bits each, the
+ * most significant first.  d has only the 64 significant bits of the
+ * x87 long double, the host's.
+ */
+void abi_fp128bits(long double d, unsigned long w[4]) {
+	unsigned se;
+	unsigned long hi, lo;
+
+	sysv_fp80bits(d, &se, &hi, &lo);
+	hi &= 0x7FFFFFFFUL;	/* the leading 1 is implicit */
+	w[0] = (unsigned long)se<<16 | hi>>15;
+	w[1] = (hi&0x7FFF)<<17 | lo>>15;
+	w[2] = (lo&0x7FFF)<<17;
+	w[3] = 0;
+}

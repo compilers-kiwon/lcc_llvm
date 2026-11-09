@@ -9,6 +9,8 @@ xx(x86/win32,    x86IR) \
 xx(x86/linux,    x86linuxIR) \
 xx(llvm/x86_64-linux,llvm_x86_64_linuxIR) \
 xx(mlir/x86_64-linux,mlir_x86_64_linuxIR) \
+xx(llvm/aarch64-linux,llvm_aarch64_linuxIR) \
+xx(mlir/aarch64-linux,mlir_aarch64_linuxIR) \
 xx(symbolic/osf, symbolic64IR) \
 xx(symbolic/irix,symbolicIR) \
 xx(symbolic,     symbolicIR) \

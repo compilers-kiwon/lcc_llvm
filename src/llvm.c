@@ -329,6 +329,21 @@ static char *fp80str(long double d) {
 	return string(buf);
 }
 
+/* fp128str - d as an IEEE quad constant: 0xL, then the low 64 bits and
+   the high 64 bits */
+static char *fp128str(long double d) {
+	char buf[36];
+	unsigned long w[4];
+
+	abi_fp128bits(d, w);
+	hexdigits(buf, 3, 8, w[2]);
+	hexdigits(buf, 11, 8, w[3]);
+	hexdigits(buf, 19, 8, w[0]);
+	hexdigits(buf, 27, 8, w[1]);
+	buf[0] = '0', buf[1] = 'x', buf[2] = 'L', buf[35] = 0;
+	return string(buf);
+}
+
 /* floatstr - floating constant d of size bytes, in LLVM's hex form */
 static char *floatstr(long double d, int size) {
 	static union { int x; char endian; } little = { 1 };
@@ -338,7 +353,7 @@ static char *floatstr(long double d, int size) {
 	int i;
 
 	if (size > 8)
-		return fp80str(d);
+		return strcmp(tg->ldtype, "fp128") == 0 ? fp128str(d) : fp80str(d);
 	memcpy(b, &x, sizeof x);
 	*s++ = '0';
 	*s++ = 'x';
@@ -588,6 +603,103 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
 }
 
 /*
+ * vaaddr64 - emit the AAPCS64 va_arg for an argument of type ty, and
+ * return its address.  The va_list ap has __stack at 0, __gr_top at 8,
+ * __vr_top at 16, __gr_offs at 24 and __vr_offs at 28; an offset is
+ * negative while registers are left, and counts up to 0 from the top of
+ * its save area, 8 bytes for each general register and 16 for each
+ * SIMD register.  An argument is in registers if all it needs are
+ * left, else on the stack.  The elements of an HFA of floats or doubles
+ * in registers are put together in slot; a structure of more than 16
+ * bytes is passed by the address of a copy.
+ */
+static char *vaaddr64(char *ap, Type ty, char *slot) {
+	Type base = NULL;
+	int n, gp = 1, nreg = 1, byref = 0, size, align = ty->align, i;
+	int chk, reg, mem, done;
+	char *offp, *offs, *c, *next, *topp, *top, *off64, *ra, *stk, *stk2, *a;
+
+	if (isstruct(ty) && (n = aapcs64_hfa(ty, &base)) > 0)
+		gp = 0, nreg = n;
+	else if (isstruct(ty) && ty->size > 16)
+		byref = 1, align = 8;
+	else if (isstruct(ty))
+		nreg = (ty->size + 7)/8;
+	else if (isfloat(ty))
+		gp = 0;
+	size = byref ? 8 : roundup(ty->size, 8);
+	chk = ++nblock;
+	reg = ++nblock;
+	mem = ++nblock;
+	done = ++nblock;
+	offp = newreg();
+	inst("%s = getelementptr i8, ptr %s, i64 %d", offp, ap, gp ? 24 : 28);
+	offs = newreg();
+	inst("%s = load i32, ptr %s", offs, offp);
+	c = newreg();
+	inst("%s = icmp sge i32 %s, 0", c, offs);
+	inst("br i1 %s, label %%b%d, label %%b%d", c, mem, chk);
+	print("b%d:\n", chk);
+	if (gp && align > 8) {	/* an even pair of registers */
+		char *x = newreg(), *y = newreg();
+		inst("%s = add i32 %s, 15", x, offs);
+		inst("%s = and i32 %s, -16", y, x);
+		offs = y;
+	}
+	next = newreg();
+	inst("%s = add i32 %s, %d", next, offs, gp ? 8*nreg : 16*nreg);
+	inst("store i32 %s, ptr %s", next, offp);
+	c = newreg();
+	inst("%s = icmp sgt i32 %s, 0", c, next);
+	inst("br i1 %s, label %%b%d, label %%b%d", c, mem, reg);
+	print("b%d:\n", reg);
+	topp = newreg();
+	inst("%s = getelementptr i8, ptr %s, i64 %d", topp, ap, gp ? 8 : 16);
+	top = newreg();
+	inst("%s = load ptr, ptr %s", top, topp);
+	off64 = newreg();
+	inst("%s = sext i32 %s to i64", off64, offs);
+	ra = newreg();
+	inst("%s = getelementptr i8, ptr %s, i64 %s", ra, top, off64);
+	if (slot && isstruct(ty)) {	/* gather the elements */
+		char *t = base->size == 4 ? "float" : "double";
+		for (i = 0; i < nreg; i++) {
+			char *src = newreg(), *dst = newreg(), *v = newreg();
+			inst("%s = getelementptr i8, ptr %s, i64 %d", src, ra, 16*i);
+			inst("%s = getelementptr i8, ptr %s, i64 %d", dst, slot, i*base->size);
+			inst("%s = load %s, ptr %s", v, t, src);
+			inst("store %s %s, ptr %s", t, v, dst);
+		}
+		ra = slot;
+	}
+	inst("br label %%b%d", done);
+	print("b%d:\n", mem);
+	stk = newreg();
+	inst("%s = load ptr, ptr %s", stk, ap);
+	if (align > 8) {
+		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
+		inst("%s = ptrtoint ptr %s to i64", x, stk);
+		inst("%s = add i64 %s, 15", y, x);
+		inst("%s = and i64 %s, -16", z, y);
+		inst("%s = inttoptr i64 %s to ptr", w, z);
+		stk = w;
+	}
+	stk2 = newreg();
+	inst("%s = getelementptr i8, ptr %s, i64 %d", stk2, stk, size);
+	inst("store ptr %s, ptr %s", stk2, ap);
+	inst("br label %%b%d", done);
+	print("b%d:\n", done);
+	a = newreg();
+	inst("%s = phi ptr [ %s, %%b%d ], [ %s, %%b%d ]", a, ra, reg, stk, mem);
+	if (byref) {
+		char *p = newreg();
+		inst("%s = load ptr, ptr %s", p, a);
+		a = p;
+	}
+	return a;
+}
+
+/*
  * emitbuiltin - emit the call p to the stdarg function b.  va_arg
  * returns the address of a value of the type promoted by a call (int
  * for char and short, whose bytes come first, and double for float).
@@ -619,7 +731,10 @@ static char *emitbuiltin(Node p, int b) {
 	}
 	assert(b == VAARG);
 	ty = unqual(freturn(p->syms[0]->type)->type);
-	v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
+	if (tg->abi == &aapcs64abi)
+		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
+	else
+		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);
 	if (slot && !isstruct(ty)) {	/* float */
 		char *d = newreg(), *f = newreg();
 		inst("%s = load double, ptr %s", d, v);

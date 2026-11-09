@@ -1,6 +1,6 @@
 /*
  * The calling conventions of the llvm and mlir back ends, and data
- * formats they share; see sysv.c.  Types are named by
+ * formats they share; see sysv.c and aapcs64.c.  Types are named by
  * their LLVM names: "float", "double", "fp128", "x86_fp80", "iN", "ptr".
  */
 
@@ -47,7 +47,7 @@ struct abi {
 	int (*needsslot)(Type ty);
 };
 
-extern struct abi sysvabi;
+extern struct abi sysvabi, aapcs64abi;
 
 /* abi_memtype - the LLVM type element e is loaded and stored as */
 extern char *abi_memtype(struct elem *e);
@@ -62,6 +62,9 @@ extern void abi_elems(struct part *p, Type ty, int off, int n, int size, char *t
 #define abi_isagg(p) ((p)->type[0] == '[' || (p)->type[0] == '{')
 
 extern int abi_returnstwice(char *);
+extern int aapcs64_hfa(Type, Type *);
+
+extern void abi_fp128bits(long double, unsigned long [4]);
 
 /* SysV x86-64 parts for va_arg, and the x87 80-bit format */
 extern int sysv_structparts(Type, struct regs *, char *[]);

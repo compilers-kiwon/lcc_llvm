@@ -66,6 +66,7 @@ RCCOBJS=$Balloc$O \
 	$Bllvm$O \
 	$Babi$O \
 	$Bsysv$O \
+	$Baapcs64$O \
 	$Bmlir$O
 
 $Brcc$E::	$Bmain$O $Blibrcc$A $(EXTRAOBJS)
@@ -102,6 +103,7 @@ $Bsym$O:	src/sym.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sym.c
 $Bllvm$O:	src/llvm.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/llvm.c
 $Babi$O:	src/abi.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/abi.c
 $Bsysv$O:	src/sysv.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/sysv.c
+$Baapcs64$O:	src/aapcs64.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/aapcs64.c
 $Bmlir$O:	src/mlir.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/mlir.c
 $Bsymbolic$O:	src/symbolic.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/symbolic.c
 $Bbytecode$O:	src/bytecode.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/bytecode.c
@@ -269,6 +271,7 @@ RCCSRCS=src/alloc.c \
 	src/llvm.c \
 	src/abi.c \
 	src/sysv.c \
+	src/aapcs64.c \
 	src/mlir.c \
 	$Bdagcheck.c \
 	$Balpha.c \

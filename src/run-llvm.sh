@@ -1,12 +1,16 @@
 #!/bin/sh
 # run-llvm.sh - compile, run and check test programs with -target=llvm/x86_64-linux
 #
-# usage: src/run-llvm.sh [-b builddir] [-o outdir] [-q] suite [dir] [name ...]
+# usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
+#
+# target is that of the lcc in builddir: x86_64-linux (the default), or
+# aarch64-linux, whose programs run with qemu-aarch64; $TARGET too.
 #
 # suites:
 #   lcc               tst/*.c; input tst/NAME.0, stdout compared with NAME.1bk
 #                     and compiler messages with NAME.2bk, taken from
-#                     llvm/x86_64-linux/tst if there, else x86/linux/tst;
+#                     llvm/TARGET/tst if there, else llvm/x86_64-linux/tst,
+#                     else x86/linux/tst;
 #                     without NAME.1bk only the messages are compared
 #   unit              tst/llvm/NAME.c compiled by lcc and linked with
 #                     tst/llvm/NAME-drv.c compiled by clang ($DRVCC); the driver
@@ -33,7 +37,8 @@
 # only messages are skipped.  $LCCLIBS goes after the source file.
 # $LCCFLAGS are more options for lcc, e.g. LCCFLAGS=-Wa-O2 to have clang
 # optimize what lcc emits.  $DRVCC compiles the unit test drivers instead
-# of clang, e.g. DRVCC=gcc to link lcc's code with gcc's.
+# of clang, e.g. DRVCC=gcc to link lcc's code with gcc's; for another
+# target, clang and gcc stand for its cross compilers.
 #
 # With lcc itself, each program is also compiled with -S and the LLVM IR
 # checked with opt -passes=verify ($OPT), since clang does not verify
@@ -49,12 +54,14 @@
 cd `dirname $0`/.. || exit 1
 
 BUILDDIR=${BUILDDIR-.}
+TARGET=${TARGET-x86_64-linux}
 quiet=0
 outdir=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-b)	BUILDDIR=$2; shift 2 ;;
 	-o)	outdir=$2; shift 2 ;;
+	-t)	TARGET=$2; shift 2 ;;
 	-q)	quiet=1; shift ;;
 	-*)	echo "$0: unknown option $1" 1>&2; exit 2 ;;
 	*)	break ;;
@@ -77,13 +84,26 @@ if [ -n "$LCC" ]; then
 	ownlcc=0
 else
 	ownlcc=1
-	LCC="$BUILDDIR/lcc -Wo-lccdir=$BUILDDIR -Iinclude/llvm/x86_64-linux"
+	LCC="$BUILDDIR/lcc -Wo-lccdir=$BUILDDIR -Iinclude/llvm/$TARGET"
 fi
 LCC="$LCC $LCCFLAGS"
 DRVCC=${DRVCC-clang}
+# RUN runs a program of the target, NM lists the symbols of its objects
+case $TARGET in
+x86_64-linux)
+	RUN= NM=nm ;;
+aarch64-linux)
+	RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu" NM=llvm-nm-18
+	case "$DRVCC" in
+	clang)	DRVCC="clang --target=aarch64-linux-gnu -fuse-ld=lld" ;;
+	gcc)	DRVCC=aarch64-linux-gnu-gcc ;;
+	esac ;;
+*)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
+esac
+command -v $NM >/dev/null || NM=/usr/lib/llvm-18/bin/llvm-nm
 OPT=${OPT-opt}
 MLIRBIN=${MLIRBIN-/usr/lib/llvm-21/bin}
-T=${outdir:-$BUILDDIR/llvm/x86_64-linux/tst/$suite}
+T=${outdir:-$BUILDDIR/llvm/$TARGET/tst/$suite}
 mkdir -p $T || exit 1
 
 # strict C89 check for the external suites
@@ -225,9 +245,9 @@ verifyir() {
 # sizes name: the data objects of $T/name.o whose copies r_NAME the unit
 # test driver defines have their sizes; print those that do not
 sizes() {
-	LC_ALL=C nm -S $T/$1.o 2>/dev/null |
+	LC_ALL=C $NM -S $T/$1.o 2>/dev/null |
 	awk 'NF == 4 && $3 ~ /^[bBdDrR]$/ { print $4, $2 }' | LC_ALL=C sort >$T/$1.sz1
-	LC_ALL=C nm -S $T/$1 2>/dev/null |
+	LC_ALL=C $NM -S $T/$1 2>/dev/null |
 	awk 'NF == 4 && $3 ~ /^[bBdDrR]$/ && $4 ~ /^r_/ { print substr($4, 3), $2 }' |
 	LC_ALL=C sort >$T/$1.sz2
 	LC_ALL=C join $T/$1.sz1 $T/$1.sz2 | awk '$2 != $3 {
@@ -237,7 +257,7 @@ sizes() {
 
 # execute name input seconds: run $T/name; set $status
 execute() {
-	timeout $3 $T/$1 <$2 >$T/$1.out 2>$T/$1.err
+	timeout $3 $RUN $T/$1 <$2 >$T/$1.out 2>$T/$1.err
 	status=$?
 }
 
@@ -254,8 +274,12 @@ case "$suite" in
 lcc)
 	for src in tst/*.c; do
 		n=`basename $src .c`; selected $n || continue
-		out1=llvm/x86_64-linux/tst/$n.1bk; [ -r $out1 ] || out1=x86/linux/tst/$n.1bk
-		out2=llvm/x86_64-linux/tst/$n.2bk; [ -r $out2 ] || out2=x86/linux/tst/$n.2bk
+		out1=llvm/$TARGET/tst/$n.1bk
+		[ -r $out1 ] || out1=llvm/x86_64-linux/tst/$n.1bk
+		[ -r $out1 ] || out1=x86/linux/tst/$n.1bk
+		out2=llvm/$TARGET/tst/$n.2bk
+		[ -r $out2 ] || out2=llvm/x86_64-linux/tst/$n.2bk
+		[ -r $out2 ] || out2=x86/linux/tst/$n.2bk
 		if [ ! -r $out1 ]; then		# compile only, compare messages
 			if [ $ownlcc = 0 ]; then report SKIP $n "checks only lcc's messages"; continue; fi
 			timeout 300 $LCC -Wf-errout=$T/$n.2 -S -o $T/$n.ll $src >$T/$n.cerr 2>&1
@@ -302,7 +326,7 @@ c-testsuite)
 		grep -w c89 $src.tags >/dev/null 2>&1 || continue
 		isc89 $src || continue
 		compile $n $src || continue
-		timeout 60 $T/$n </dev/null >$T/$n.out 2>&1
+		timeout 60 $RUN $T/$n </dev/null >$T/$n.out 2>&1
 		status=$?
 		if [ $status = 124 ]; then report TIMEOUT $n
 		elif [ $status != 0 ]; then report FAIL $n "exit status $status"
@@ -330,7 +354,7 @@ llvm-bench)
 			[ -r $ref ] || continue
 			isc89 $src || continue
 			compile $n $src || continue
-			timeout 300 $T/$n </dev/null >$T/$n.out 2>&1
+			timeout 300 $RUN $T/$n </dev/null >$T/$n.out 2>&1
 			status=$?
 			if [ $status = 124 ]; then report TIMEOUT $n; continue; fi
 			if [ -s $T/$n.out ] && [ -n "`tail -c 1 $T/$n.out`" ]; then

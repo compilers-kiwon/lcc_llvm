@@ -65,7 +65,7 @@ stage 2 $B
 stage 3 $O/2
 
 GEN="dagcheck alpha mips sparc x86 x86linux"
-SRCS="`ls src/*.c cpp/*.c lburg/*.c lib/*.c etc/lcc.c etc/bprint.c etc/llvm-x86_64-linux.c etc/mlir-x86_64-linux.c`"
+SRCS="`ls src/*.c cpp/*.c lburg/*.c lib/*.c etc/lcc.c etc/bprint.c etc/llvm-x86_64-linux.c etc/mlir-x86_64-linux.c etc/llvm-aarch64-linux.c etc/mlir-aarch64-linux.c`"
 for g in $GEN; do
 	SRCS="$SRCS $B/$g.c"
 done
