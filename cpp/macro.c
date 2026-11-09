@@ -3,6 +3,8 @@
 #include <string.h>
 #include "cpp.h"
 
+static int varargs(Tokenrow **, int, int);
+
 /*
  * do a macro definition.  tp points to the name being defined in the line
  */
@@ -26,6 +28,7 @@ dodefine(Tokenrow *trp)
 	/* collect arguments */
 	tp += 1;
 	args = NULL;
+	np->flag &= ~ISVARMAC;
 	if (tp<trp->lp && tp->type==LP && tp->wslen==0) {
 		/* macro with args */
 		int narg = 0;
@@ -36,6 +39,20 @@ dodefine(Tokenrow *trp)
 			int err = 0;
 			for (;;) {
 				Token *atp;
+				if (tp->type==ELLIPS && (tp+1)->type==RP) {
+					/* C99: the rest of the arguments are __VA_ARGS__;
+					   system headers (-J) may use it, as newlib's do */
+					static Token va = { NAME, 0, 0, 0, 11, (uchar*)"__VA_ARGS__" };
+					if (!cursource->sys)
+						error(WARNING, "Variadic macros are not C89");
+					if (narg>=args->max)
+						growtokenrow(args);
+					*args->lp++ = va;
+					narg++;
+					np->flag |= ISVARMAC;
+					tp += 1;
+					break;
+				}
 				if (tp->type!=NAME) {
 					err++;
 					break;
@@ -212,6 +229,8 @@ expand(Tokenrow *trp, Nlist *np)
 			/* gatherargs has already pushed trp->tr to the next token */
 			return;
 		}
+		if (np->flag&ISVARMAC)
+			narg = varargs(atr, narg, rowlen(np->ap));
 		if (narg != rowlen(np->ap)) {
 			error(ERROR, "Disagreement in number of macro arguments");
 			trp->tp->hideset = newhideset(trp->tp->hideset, np);
@@ -241,6 +260,37 @@ expand(Tokenrow *trp, Nlist *np)
 	dofree(ntr.bp);
 	return;
 }	
+
+/*
+ * varargs - make the arguments atr[nparam-1..narg-1] of a variadic macro
+ * of nparam parameters one, __VA_ARGS__, with commas between them, or an
+ * empty one if there are none; return the new number of arguments
+ */
+static int
+varargs(Tokenrow **atr, int narg, int nparam)
+{
+	static Token comma = { COMMA, 0, 0, 0, 1, (uchar*)"," };
+	Tokenrow *r;
+	int i, n = 0;
+
+	if (narg < nparam-1)
+		return narg;	/* too few: an error later */
+	for (i = nparam-1; i < narg; i++)
+		n += rowlen(atr[i]) + 1;
+	r = new(Tokenrow);
+	maketokenrow(n + 1, r);
+	for (i = nparam-1; i < narg; i++) {
+		Token *tp;
+		if (i > nparam-1)
+			*r->lp++ = comma;
+		for (tp = atr[i]->bp; tp < atr[i]->lp; tp++)
+			*r->lp++ = *tp;
+		dofree(atr[i]->bp);
+		dofree(atr[i]);
+	}
+	atr[nparam-1] = r;
+	return nparam;
+}
 
 /*
  * Gather an arglist, starting in trp with tp pointing at the macro name.

@@ -550,6 +550,7 @@ setsource(char *name, FILE *fd, char *str)
 	s->filename = name;
 	s->next = cursource;
 	s->ifdepth = 0;
+	s->sys = cursource ? cursource->sys : 0;
 	cursource = s;
 	/* slop at right for EOB */
 	if (str) {

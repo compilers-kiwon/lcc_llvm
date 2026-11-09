@@ -22,7 +22,7 @@ setup(int argc, char **argv)
 	extern void setup_kwtab(void);
 
 	setup_kwtab();
-	while ((c = getopt(argc, argv, "MNOVv+I:D:U:F:lg")) != -1)
+	while ((c = getopt(argc, argv, "MNOVv+I:J:D:U:F:lg")) != -1)
 		switch (c) {
 		case 'N':
 			for (i=0; i<NINCLUDE; i++)
@@ -30,9 +30,11 @@ setup(int argc, char **argv)
 					includelist[i].deleted = 1;
 			break;
 		case 'I':
+		case 'J':	/* a directory of system headers */
 			for (i=NINCLUDE-2; i>=0; i--) {
 				if (includelist[i].file==NULL) {
 					includelist[i].always = 1;
+					includelist[i].sys = c=='J';
 					includelist[i].file = optarg;
 					break;
 				}

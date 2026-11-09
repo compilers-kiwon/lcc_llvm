@@ -33,6 +33,7 @@ enum kwtype { KIF, KIFDEF, KIFNDEF, KELIF, KELSE, KENDIF, KINCLUDE, KDEFINE,
 #define	ISKW		02	/* is PP keyword */
 #define	ISUNCHANGE	04	/* can't be #defined in PP */
 #define	ISMAC		010	/* builtin macro, e.g. __LINE__ */
+#define	ISVARMAC	020	/* variadic macro (C99), last argument __VA_ARGS__ */
 
 #define	EOB	0xFE		/* sentinel for end of input buffer */
 #define	EOFC	0xFD		/* sentinel for end of input file */
@@ -63,6 +64,7 @@ typedef struct source {
 	uchar	*inl;		/* end of input */
 	FILE*	fd;		/* input source */
 	int	ifdepth;	/* conditional nesting in include */
+	int	sys;		/* a system header, or included by one */
 	struct	source *next;	/* stack for #include */
 } Source;
 
@@ -79,6 +81,7 @@ typedef struct nlist {
 typedef	struct	includelist {
 	char	deleted;
 	char	always;
+	char	sys;		/* a directory of system headers (-J) */
 	char	*file;
 } Includelist;
 

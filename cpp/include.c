@@ -46,6 +46,7 @@ doinclude(Tokenrow *trp)
 	if (trp->tp < trp->lp || len==0)
 		goto syntax;
 	fname[len] = '\0';
+	ip = NULL;
 	if (fname[0]=='/') {
 		fd = fopen(fname, "r");
 		strcpy(iname, fname);
@@ -70,6 +71,8 @@ doinclude(Tokenrow *trp)
 		if (++incdepth > 10)
 			error(FATAL, "#include too deeply nested");
 		setsource((char*)newstring((uchar*)iname, strlen(iname), 0), fd, NULL);
+		if (ip && ip->sys)
+			cursource->sys = 1;
 		genline();
 	} else {
 		trp->tp = trp->bp+2;
