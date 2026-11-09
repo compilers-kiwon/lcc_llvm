@@ -15,6 +15,8 @@ xx(llvm/riscv64-linux,llvm_riscv64_linuxIR) \
 xx(mlir/riscv64-linux,mlir_riscv64_linuxIR) \
 xx(llvm/armhf-linux,llvm_armhf_linuxIR) \
 xx(mlir/armhf-linux,mlir_armhf_linuxIR) \
+xx(llvm/cortexm3-eabi,llvm_cortexm3_eabiIR) \
+xx(mlir/cortexm3-eabi,mlir_cortexm3_eabiIR) \
 xx(symbolic/osf, symbolic64IR) \
 xx(symbolic/irix,symbolicIR) \
 xx(symbolic,     symbolicIR) \

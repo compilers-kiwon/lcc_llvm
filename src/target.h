@@ -23,7 +23,10 @@ xx(riscv64_linux, "riscv64-unknown-linux-gnu", \
 	"fp128", "f128", 8, 16, 8, 1, 1, &riscv64abi) \
 xx(armhf_linux, "armv7-unknown-linux-gnueabihf", \
 	"e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64", \
-	"double", "f64", 4, 8, 4, 1, 0, &armabi)
+	"double", "f64", 4, 8, 4, 1, 0, &armabi) \
+xx(cortexm3_eabi, "thumbv7m-unknown-none-eabi", \
+	"e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64", \
+	"double", "f64", 4, 8, 4, 1, 0, &armsoftabi)
 
 /* a target, as a back end looks it up from IR */
 struct target {

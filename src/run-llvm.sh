@@ -4,7 +4,9 @@
 # usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
 #
 # target is that of the lcc in builddir: x86_64-linux (the default),
-# aarch64-linux, riscv64-linux or armhf-linux, whose programs run with qemu; $TARGET
+# aarch64-linux, riscv64-linux, armhf-linux or cortexm3-eabi, whose
+# programs run with qemu (cortexm3-eabi on qemu-system-arm with
+# semihosting; its test drivers are built by src/cm3cc.sh); $TARGET
 # too.  The lcc may be a program of that target itself (src/selfhost.sh -x).
 #
 # suites:
@@ -91,7 +93,11 @@ else
 fi
 LCC="$LCC $LCCFLAGS"
 DRVCC=${DRVCC-clang}
-# RUN runs a program of the target, NM lists the symbols of its objects
+# RUN runs a program of the target, NM lists the symbols of its objects.
+# On a target without an OS, REFCC (gcc) checks first that the external
+# tests can be compiled and the benchmarks run there at all, and these
+# are built with SMALL, LLVM's flag for small targets.
+NOOS= REFCC= SMALL=
 case $TARGET in
 x86_64-linux)
 	RUN= NM=nm ;;
@@ -122,6 +128,13 @@ armhf-linux)
 	clang)	DRVCC="clang --target=arm-linux-gnueabihf -fuse-ld=lld" ;;
 	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -U_FILE_OFFSET_BITS" ;;
 	esac ;;
+cortexm3-eabi)	# no OS: newlib and semihosting on qemu's mps2-an385 board
+	RUN="qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none -semihosting-config enable=on,target=native -kernel"
+	NM=llvm-nm-18
+	case "$DRVCC" in
+	clang|gcc) DRVCC="src/cm3cc.sh $BUILDDIR $DRVCC" ;;
+	esac
+	NOOS=1 REFCC="src/cm3cc.sh $BUILDDIR gcc" SMALL=-DSMALL_PROBLEM_SIZE ;;
 *)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
 esac
 command -v $NM >/dev/null || NM=/usr/lib/llvm-18/bin/llvm-nm
@@ -236,13 +249,14 @@ compile() {
 		report CFAIL $1 "`grep -v -e 'Unknown preprocessor control' -e ': warning: ' $T/$1.cerr | head -1`"
 		return 1
 	fi
-	verify $1 $2
+	verify $1 "$2"
 }
 
 # verify name src: with lcc itself, check the IR of src; report CFAIL
 # and return 1 if it does not verify
 verify() {
 	[ $ownlcc = 1 ] || return 0
+	rm -f $T/$1.ll $T/$1.mlir	# not to check what an earlier run left
 	if ! timeout 300 $LCC -S -o $T/$1.ll $2 >/dev/null 2>&1 ||
 	   ! verifyir $T/$1 >$T/$1.verr 2>&1; then
 		report CFAIL $1 "IR does not verify: `head -1 $T/$1.verr`"
@@ -277,6 +291,40 @@ sizes() {
 	LC_ALL=C join $T/$1.sz1 $T/$1.sz2 | awk '$2 != $3 {
 		printf "size of %s is 0x%s, not 0x%s\n", $1, $2, $3; bad = 1 }
 	END { exit bad }'
+}
+
+# refcompiles name src: without an OS, whether gcc compiles src for the
+# target (some tests need POSIX headers); report SKIP if it does not
+refcompiles() {
+	[ -z "$NOOS" ] && return 0
+	$REFCC -std=gnu89 -w -c -o $T/$1.refo -I`dirname $2` $2 >/dev/null 2>&1 && return 0
+	report SKIP $1 "gcc does not compile it for this target"
+	return 1
+}
+
+# benchrun name prog: run the benchmark prog; its output and "exit N"
+# go to $T/name.out; set $status
+benchrun() {
+	timeout 300 $RUN $2 </dev/null >$T/$1.out 2>&1
+	status=$?
+	[ $status = 124 ] && return
+	if [ -s $T/$1.out ] && [ -n "`tail -c 1 $T/$1.out`" ]; then
+		echo >>$T/$1.out
+	fi
+	echo "exit $status" >>$T/$1.out
+}
+
+# refruns name src ref tol: without an OS, whether the benchmark src
+# built by gcc runs as ref says on the target (memory is small); report
+# SKIP if it does not
+refruns() {
+	[ -z "$NOOS" ] && return 0
+	if $REFCC $SMALL -std=gnu89 -w -O1 -o $T/$1.ref $2 -lm >/dev/null 2>&1; then
+		benchrun $1.ref $T/$1.ref
+		[ $status != 124 ] && fpcmp $T/$1.ref.out $3 $4 && return 0
+	fi
+	report SKIP $1 "gcc's build does not run on this target either"
+	return 1
 }
 
 # execute name input seconds: run $T/name; set $status
@@ -349,6 +397,7 @@ c-testsuite)
 		n=`basename $src .c`; selected $n || continue
 		grep -w c89 $src.tags >/dev/null 2>&1 || continue
 		isc89 $src || continue
+		refcompiles $n $src || continue
 		compile $n $src || continue
 		timeout 60 $RUN $T/$n </dev/null >$T/$n.out 2>&1
 		status=$?
@@ -362,6 +411,7 @@ torture)
 		[ -r $src ] || continue
 		n=`basename $src .c`; selected $n || continue
 		isc89 $src || continue
+		refcompiles $n $src || continue
 		compile $n $src || continue
 		execute $n /dev/null 60
 		if [ $status = 124 ]; then report TIMEOUT $n
@@ -376,17 +426,14 @@ llvm-bench)
 			n=`basename $src .c`; selected $n || continue
 			ref=`dirname $src`/$n.reference_output
 			[ -r $ref ] || continue
+			[ -n "$SMALL" -a -r $ref.small ] && ref=$ref.small
 			isc89 $src || continue
-			compile $n $src || continue
-			timeout 300 $RUN $T/$n </dev/null >$T/$n.out 2>&1
-			status=$?
+			refruns $n $src $ref $tol || continue
+			compile $n "$SMALL $src" || continue
+			benchrun $n $T/$n
 			if [ $status = 124 ]; then report TIMEOUT $n; continue; fi
-			if [ -s $T/$n.out ] && [ -n "`tail -c 1 $T/$n.out`" ]; then
-				echo >>$T/$n.out
-			fi
-			echo "exit $status" >>$T/$n.out
 			if fpcmp $T/$n.out $ref $tol; then report PASS $n
-			else report FAIL $n "output differs from $n.reference_output"; fi
+			else report FAIL $n "output differs from `basename $ref`"; fi
 		done
 	done ;;
 esac

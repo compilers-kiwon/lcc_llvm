@@ -781,7 +781,7 @@ static char *emitbuiltin(Node p, int b) {
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
 	else if (tg->abi == &riscv64abi)
 		v = vaaddrptr(ap, ty, 8, 16);
-	else if (tg->abi == &armabi)
+	else if (tg->abi == &armabi || tg->abi == &armsoftabi)
 		v = vaaddrptr(ap, ty, 4, 0);
 	else
 		v = vaaddr(ap, ty, isstruct(ty) ? slot : NULL);

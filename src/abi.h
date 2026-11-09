@@ -63,7 +63,7 @@ struct abi {
 	int byvalalign;
 };
 
-extern struct abi sysvabi, aapcs64abi, riscv64abi, armabi;
+extern struct abi sysvabi, aapcs64abi, riscv64abi, armabi, armsoftabi;
 
 /* abi_memtype - the LLVM type element e is loaded and stored as */
 extern char *abi_memtype(struct elem *e);

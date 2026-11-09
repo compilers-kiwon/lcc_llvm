@@ -19,7 +19,13 @@ static char rcsid[] = "$Id$";
  * VFP registers: no HFA.  Variadic arguments go in core registers, so a
  * call without a prototype passes its arguments as fixed ones, as clang
  * does.  A char or short result is extended to 32 bits by the callee.
+ *
+ * armsoftabi is the base standard for Cortex-M3 (soft float, no VFP):
+ * the same, but without HFAs, so that variadic and fixed arguments go
+ * in the same registers.
  */
+
+static int hfaok = 1;	/* HFAs may go in VFP registers */
 
 static void initregs(struct regs *r) {
 	r->gp = 4;
@@ -52,7 +58,7 @@ static int arg(Type ty, struct regs *r, struct part **part) {
 
 	ty = unqual(ty);
 	*part = abi_parts(1);
-	if (!r->vfunc && (n = abi_hfa(ty, &base)) > 0) {
+	if (hfaok && !r->vfunc && (n = abi_hfa(ty, &base)) > 0) {
 		hfapart(*part, ty, base, n);
 		return 1;
 	}
@@ -71,7 +77,7 @@ static int ret(Type ty, int vfunc, struct part *part) {
 
 	ty = unqual(ty);
 	part->alignstack = 0;
-	if (!vfunc && (n = abi_hfa(ty, &base)) > 0) {
+	if (hfaok && !vfunc && (n = abi_hfa(ty, &base)) > 0) {
 		hfapart(part, ty, base, n);
 		return 1;
 	}
@@ -89,3 +95,23 @@ static int needsslot(Type ty) {
 }
 
 struct abi armabi = { initregs, scalar, arg, ret, needsslot, NULL, 1, 0, 1, 4 };
+
+static int argsoft(Type ty, struct regs *r, struct part **part) {
+	int n;
+
+	hfaok = 0;
+	n = arg(ty, r, part);
+	hfaok = 1;
+	return n;
+}
+
+static int retsoft(Type ty, int vfunc, struct part *part) {
+	int n;
+
+	hfaok = 0;
+	n = ret(ty, vfunc, part);
+	hfaok = 1;
+	return n;
+}
+
+struct abi armsoftabi = { initregs, scalar, argsoft, retsoft, needsslot, NULL, 0, 0, 1, 4 };
