@@ -2,12 +2,14 @@
  * Calls to functions with prototypes: recursion, mutual recursion, more
  * arguments than argument registers, mixed argument types, calls through
  * function pointers, calls as arguments and in conditions, char and
- * short parameters and results, and calls to functions compiled by clang
- * (in call-drv.c).  Compiled by lcc; call-drv.c checks the results.
+ * short parameters and results, int parameters and results with other
+ * bits above them in a 64-bit register, which RISC-V must sign-extend,
+ * and calls to functions compiled by clang (in call-drv.c).  Compiled by lcc; call-drv.c checks the results.
  */
 long ext_add(long, long);		/* in call-drv.c */
 signed char ext_narrow(int);		/* in call-drv.c */
 int ext_cb(int (*)(int), int);		/* in call-drv.c */
+long ext_widen(unsigned, int);		/* in call-drv.c */
 
 int fib(int n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }
 int odd(int);
@@ -49,4 +51,8 @@ int narrowsum(char c, short s, unsigned char uc) { return lowc(c) + s + uc + ush
 
 long useext(long a, long b) { return ext_add(a, b) + ext_add(ext_add(a, 1), b); }
 int usenarrow(int x) { return ext_narrow(x) + 1; }
+/* truncated longs: the bits above them are those of the long */
+unsigned truncu(long l) { return l; }
+int trunci(long l) { return l; }
+long usewiden(long a, long b) { return ext_widen(a, b); }
 int usecb(int x) { return ext_cb(sq, x) + ext_cb(add1, x); }

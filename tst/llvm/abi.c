@@ -143,10 +143,10 @@ double lc_vs(int k, int which, int self) {
 	double (*f)(const char *, ...) = self ? lvs : dvs;
 	struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f2;
 	struct id g; struct fi h; struct c3 i; struct a13 j; struct nest kk; struct ffi l;
-	struct sd m; struct f1 nn; struct d1 o; struct ic p;
+	struct sd m; struct f1 nn; struct d1 o; struct ic p; struct f2 t;
 	fill_i3(&a, k); fill_f3(&b, k); fill_di(&c, k); fill_l3(&d, k); fill_d2(&e, k); fill_l2(&f2, k);
 	fill_id(&g, k); fill_fi(&h, k); fill_c3(&i, k); fill_a13(&j, k); fill_nest(&kk, k); fill_ffi(&l, k);
-	fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k);
+	fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k); fill_f2(&t, k);
 	switch (which) {
 	case 0: return f("abcdefghijklmnop", a, b, c, d, e, f2, g, h, i, j, kk, l, m, nn, o, p);
 	case 1: return f("cccccccc", c, c, c, c, c, c, c, c);
@@ -155,6 +155,7 @@ double lc_vs(int k, int which, int self) {
 	case 4: return f("yyyyycyf", 1L, 2L, 3L, 4L, 5L, c, 6L, f2);
 	case 5: return f("yyyyfgy", 1L, 2L, 3L, 4L, f2, g, 7L);
 	case 6: return f("kblkblkbl", kk, b, l, kk, b, l, kk, b, l);
+	case 7: return f("thth", t, h, t, h);	/* in registers */
 	}
 	return 0;
 }

@@ -135,10 +135,10 @@ int main(void) {
 		{
 			struct i3 a; struct f3 b; struct di c; struct l3 d; struct d2 e; struct l2 f2;
 			struct id g; struct fi h; struct c3 i; struct a13 j; struct nest kk; struct ffi l;
-			struct sd m; struct f1 nn; struct d1 o; struct ic p;
+			struct sd m; struct f1 nn; struct d1 o; struct ic p; struct f2 t;
 			fill_i3(&a, k); fill_f3(&b, k); fill_di(&c, k); fill_l3(&d, k); fill_d2(&e, k); fill_l2(&f2, k);
 			fill_id(&g, k); fill_fi(&h, k); fill_c3(&i, k); fill_a13(&j, k); fill_nest(&kk, k); fill_ffi(&l, k);
-			fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k);
+			fill_sd(&m, k); fill_f1(&nn, k); fill_d1(&o, k); fill_ic(&p, k); fill_f2(&t, k);
 #define VS(w, args) CHK(lvs args, dvs args); CHK(lc_vs(k, w, 0), dvs args); CHK(lc_vs(k, w, 1), dvs args);
 			VS(0, ("abcdefghijklmnop", a, b, c, d, e, f2, g, h, i, j, kk, l, m, nn, o, p))
 			VS(1, ("cccccccc", c, c, c, c, c, c, c, c))
@@ -147,6 +147,7 @@ int main(void) {
 			VS(4, ("yyyyycyf", 1L, 2L, 3L, 4L, 5L, c, 6L, f2))
 			VS(5, ("yyyyfgy", 1L, 2L, 3L, 4L, f2, g, 7L))
 			VS(6, ("kblkblkbl", kk, b, l, kk, b, l, kk, b, l))
+			VS(7, ("thth", t, h, t, h))
 		}
 	}
 	printf("%d checks, %d bad\n", n, bad);

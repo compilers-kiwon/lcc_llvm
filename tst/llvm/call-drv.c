@@ -1,8 +1,12 @@
 /*
- * Driver for call.c, which also calls ext_add, ext_narrow and ext_cb
- * below.  Exits with 0 if every check passes.
+ * Driver for call.c, which also calls ext_add, ext_narrow, ext_cb and
+ * ext_widen below.  Exits with 0 if every check passes.  Compiled with
+ * optimization (run-llvm.sh DRVOPT=-O2), ext_widen and the uses of
+ * truncu and trunci rely on int arguments and results being extended as
+ * the ABI requires.
  */
 #include <stdio.h>
+#include "port.h"
 int fib(int), even(int), odd(int); long ack(long, long);
 long many(int, long, char *, int, long, int, int, long, int, long), callmany(char *);
 double dpass(double), dpick(int, double, float, double), dcall(double); float fpass(float), fpick(int, float, double, float);
@@ -10,6 +14,8 @@ int apply(int, int), compose(int (*)(int), int (*)(int), int), nested(int), add1
 extern int counter; void bump(int), bumpn(int); int firstpos(int *, int);
 char lowc(char); unsigned short ushort_of(long); int narrowsum(char, short, unsigned char);
 long useext(long, long); int usenarrow(int); int usecb(int);
+unsigned truncu(long); int trunci(long); long usewiden(long, long);
+long ext_widen(unsigned u, int i) { return (long)(int)u * 4 + i; }
 long ext_add(long a, long b) { return a + b; }
 signed char ext_narrow(int x) { return (signed char)x; }
 int ext_cb(int (*f)(int), int x) { return f(x) * 10; }
@@ -45,6 +51,11 @@ int main(void) {
 	CHK(narrowsum('A', -300, 200), 'a' - 300 + 200 + 65535, "%d");
 	CHK(useext(40, 2), 42 + 43, "%ld");
 	for (i = -300; i <= 300; i += 7) CHK(usenarrow(i), (signed char)i + 1, "%d");
+	CHK((long)(int)truncu(LV(0x12345678FFFFFFF0L, -16L)), -16L, "%ld");
+	CHK((long)trunci(LV(0x1234567880000005L, -2147483643L)), -2147483643L, "%ld");
+	CHK((long)truncu(LV(0x7654321080000001L, -2147483647L)) == 0x80000001L, 1, "%d");
+	CHK(usewiden(LV(0x12345678FFFFFFF0L, -16L), LV(0x7654321080000001L, -2147483647L)),
+		-64L - 2147483647L, "%ld");
 	for (i = -4; i <= 4; i++) CHK(usecb(i), i * i * 10 + (i + 1) * 10, "%d");
 	printf("%d checks, %d bad\n", n, bad);
 	return bad != 0;

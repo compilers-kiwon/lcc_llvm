@@ -39,7 +39,9 @@
 # $LCCFLAGS are more options for lcc, e.g. LCCFLAGS=-Wa-O2 to have clang
 # optimize what lcc emits.  $DRVCC compiles the unit test drivers instead
 # of clang, e.g. DRVCC=gcc to link lcc's code with gcc's; for another
-# target, clang and gcc stand for its cross compilers.
+# target, clang and gcc stand for its cross compilers.  $DRVOPT is their
+# optimization (default -O0); optimized drivers rely on what the ABI
+# promises of lcc's code, as extended arguments and results.
 #
 # With lcc itself, each program is also compiled with -S and the LLVM IR
 # checked with opt -passes=verify ($OPT), since clang does not verify
@@ -311,7 +313,7 @@ unit)
 			continue
 		fi
 		verify $n $src || continue
-		if ! $DRVCC -O0 -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS -lm >$T/$n.lerr 2>&1; then
+		if ! $DRVCC ${DRVOPT--O0} -fwrapv -ffp-contract=off -w -o $T/$n tst/llvm/$n-drv.c $T/$n.o $LCCLIBS -lm >$T/$n.lerr 2>&1; then
 			report CFAIL $n "driver: `head -1 $T/$n.lerr`"
 			continue
 		fi

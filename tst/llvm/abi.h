@@ -32,6 +32,7 @@ struct a13 { char s[13]; };
 struct fa3 { float a[3]; };
 struct nest { struct f2 p; int k; };
 struct bits { unsigned a:3, b:20; int c:5; };
+struct fbb { float a; int b:4, c:5; };
 struct da3 { double a[3]; };
 struct pl { char *p; long n; };
 struct sd { short a; double b; short c; };
@@ -44,7 +45,7 @@ union uli { long double l; int i; };
 
 #define SHAPES(X) X(c1) X(c3) X(s2) X(i1) X(i2) X(ic) X(i3) X(l2) X(l3) \
 	X(f1) X(f2) X(f3) X(d1) X(d2) X(fi) X(di) X(id) X(ffi) X(cd) \
-	X(a16) X(a13) X(fa3) X(nest) X(bits) X(da3) X(pl) X(sd) \
+	X(a16) X(a13) X(fa3) X(nest) X(bits) X(fbb) X(da3) X(pl) X(sd) \
 	X(ld1) X(ld2) X(ldi) X(cld)
 #define USHAPES(X) X(ul) X(uf) X(uld) X(uli)
 
@@ -99,6 +100,8 @@ static double sum_a13(struct a13 *p) { double s = 0; int i; for (i = 0; i < 13; 
 static void fill_fa3(struct fa3 *p, int k) { p->a[0] = k; p->a[1] = k + 0.5f; p->a[2] = -k; }
 static double sum_fa3(struct fa3 *p) { return p->a[0] + 10.0 * p->a[1] + 100.0 * p->a[2]; }
 static void fill_nest(struct nest *p, int k) { fill_f2(&p->p, k); p->k = k * 11; }
+static void fill_fbb(struct fbb *p, int k) { p->a = k - 0.375f; p->b = k % 8 - 4; p->c = -k % 16; }
+static double sum_fbb(struct fbb *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
 static double sum_nest(struct nest *p) { return sum_f2(&p->p) + 1000.0 * p->k; }
 static void fill_bits(struct bits *p, int k) { p->a = k; p->b = 1000 * k; p->c = -k; }
 static double sum_bits(struct bits *p) { return p->a + 10.0 * p->b + 100.0 * p->c; }
@@ -127,7 +130,7 @@ static double sum_uli(union uli *p) { return (double)p->l; }
 #define VSHAPES(X) X('a', i3) X('b', f3) X('c', di) X('d', l3) X('e', d2) \
 	X('f', l2) X('g', id) X('h', fi) X('i', c3) X('j', a13) X('k', nest) \
 	X('l', ffi) X('m', sd) X('n', f1) X('o', d1) X('p', ic) \
-	X('q', ld1) X('r', ld2) X('s', cld)
+	X('q', ld1) X('r', ld2) X('s', cld) X('t', f2)
 static double vsum(const char *fmt, va_list ap) {
 	double s = 0;
 	for (; *fmt; fmt++) {
