@@ -23,6 +23,7 @@ static void doglobal(Symbol, void *);
 static void doextern(Symbol, void *);
 static void exitparams(Symbol []);
 static void fields(Type);
+static int pcclayout(Type);
 static void funcdefn(int, char *, Type, Symbol [], Coordinate);
 static void initglobal(Symbol, int);
 static void oldparam(Symbol, void *);
@@ -513,6 +514,59 @@ static Symbol dclparam(int sclass, char *id, Type ty, Coordinate *pos) {
 	}
 	return p;
 }
+/*
+ * pcclayout - lay out the fields of ty as gcc and clang do on the targets
+ * of the llvm and mlir back ends: a bit field takes the next bits unless
+ * it would cross a boundary of its type's alignment, then it starts at
+ * that boundary, and a zero-width one moves to the next boundary.  Its
+ * unit, the int at offset, may hold other members too.  Named bit fields
+ * align the structure as their type, unnamed ones only if
+ * IR->unnamedbfalign (AAPCS).  Return whether the size overflows.
+ */
+static int pcclayout(Type ty) {
+	int off = 0, bit = 0, overflow = 0;	/* the next bit is bit of byte off */
+	Field p;
+
+	for (p = ty->u.sym->u.s.flist; p; p = p->link) {
+		int a = p->type->align ? p->type->align : 1;
+		int named = p->name && !('1' <= *p->name && *p->name <= '9');
+		if (ty->op == UNION)
+			off = bit = 0;
+		if (p->lsb) {
+			int unit = off - off%a, rel = 8*(off - unit) + bit;
+			if (p->bitsize == 0 && rel > 0
+			|| rel + p->bitsize > 8*p->type->size) {
+				unit = add(unit, a);
+				rel = 0;
+			}
+			p->offset = unit;
+			if (IR->little_endian)
+				p->lsb = rel + 1;
+			else
+				p->lsb = 8*p->type->size - rel - p->bitsize + 1;
+			rel += p->bitsize;
+			off = add(unit, rel/8);
+			bit = rel%8;
+			if (named || IR->unnamedbfalign)
+				if (a > ty->align)
+					ty->align = a;
+		} else {
+			if (bit)
+				off = add(off, 1);
+			bit = 0;
+			chkoverflow(off, a - 1);
+			off = roundup(off, a);
+			p->offset = off;
+			off = add(off, p->type->size);
+			if (a > ty->align)
+				ty->align = a;
+		}
+		if (off + (bit > 0) > ty->size)
+			ty->size = off + (bit > 0);
+	}
+	return overflow;
+}
+
 static Type structdcl(int op) {
 	char *tag;
 	Type ty;
@@ -610,8 +664,12 @@ static void fields(Type ty) {
 	{ int bits = 0, off = 0, overflow = 0;
 	  Field p, *q = &ty->u.sym->u.s.flist;
 	  ty->align = IR->structmetric.align;
+	  if (IR->pccbitfields)
+	  	overflow = pcclayout(ty);
 	  for (p = *q; p; p = p->link) {
 	  	int a = p->type->align ? p->type->align : 1;
+		if (IR->pccbitfields)
+			goto keep;	/* laid out */
 		if (p->lsb)
 			a = unsignedtype->align;
 		if (ty->op == UNION)
@@ -640,6 +698,7 @@ static void fields(Type ty) {
 			off = add(off, p->type->size);
 		if (off + bits2bytes(bits-1) > ty->size)
 			ty->size = off + bits2bytes(bits-1);
+	keep:
 	  	if (p->name == NULL
 	  	|| !('1' <= *p->name && *p->name <= '9')) {
 	  		*q = p;

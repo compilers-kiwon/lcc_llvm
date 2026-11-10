@@ -16,12 +16,12 @@
 #define I(f) mlir_##f
 static char rcsid[] = "$Id$";
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, ubf, abi) \
 extern Interface I(id##IR);
 TARGETS
 #undef xx
 static struct target targets[] = {
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, ubf, abi) \
 	{ &I(id##IR), triple, layout, ldtype, mlirld, abi },
 TARGETS
 #undef xx
@@ -2456,7 +2456,7 @@ static void I(stabline)(Coordinate *cp) {}
 static void I(stabsym)(Symbol p) {}
 static void I(stabtype)(Symbol p) {}
 
-#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, abi) \
-TARGETIR(id, lsize, ldsize, psize, uchar, quad);
+#define xx(id, triple, layout, ldtype, mlirld, lsize, ldsize, psize, uchar, quad, ubf, abi) \
+TARGETIR(id, lsize, ldsize, psize, uchar, quad, ubf);
 TARGETS
 #undef xx

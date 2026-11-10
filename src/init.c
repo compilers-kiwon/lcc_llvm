@@ -116,8 +116,14 @@ static void initend(int lev, char follow[]) {
 	test('}', follow);
 }
 
-/* initfields - initialize <= an unsigned's worth of bit fields in fields p to q */
-static int initfields(Field p, Field q) {
+/*
+ * initfields - initialize <= an unsigned's worth of bit fields, p up to
+ * q, which share the unit at p->offset, and return how many bytes it
+ * emitted; the first skip
+ * bytes of the unit, which other members took (IR->pccbitfields), are
+ * not emitted again.
+ */
+static int initfields(Field p, Field q, int skip) {
 	unsigned int bits = 0;
 	int i, n = 0;
 
@@ -145,6 +151,13 @@ static int initfields(Field p, Field q) {
 	n = (n + 7)/8;
 	for (i = 0; i < n; i++) {
 		Value v;
+		if (i < skip) {
+			if (IR->little_endian)
+				bits >>= 8;
+			else
+				bits <<= 8;
+			continue;
+		}
 		if (IR->little_endian) {
 			v.u = (unsigned char)bits;
 			bits >>= 8;
@@ -154,7 +167,7 @@ static int initfields(Field p, Field q) {
 		}
 		(*IR->defconst)(U, unsignedchar->size, v);
 	}
-	return n;
+	return n > skip ? n - skip : 0;
 }
 
 /* initstruct - initialize a struct ty of <= len bytes; if len == 0, go to } */
@@ -169,9 +182,9 @@ static int initstruct(int len, Type ty, int lev) {
 		}
 		if (p->lsb) {
 			Field q = p;
-			while (q->link && q->link->offset == p->offset)
+			while (q->link && q->link->lsb && q->link->offset == p->offset)
 				q = q->link;
-			n += initfields(p, q->link);
+			n += initfields(p, q->link, n - p->offset);
 			p = q;
 		} else {
 			initializer(p->type, lev);
@@ -179,7 +192,8 @@ static int initstruct(int len, Type ty, int lev) {
 		}
 		if (p->link) {
 			p = p->link;
-			a = p->type->align;
+			/* a bit field's unit may begin before here */
+			a = p->lsb && IR->pccbitfields ? 0 : p->type->align;
 		} else
 			a = ty->align;
 		if (a && n%a) {

@@ -152,6 +152,8 @@ void (*stabsym)  (Symbol);
 void (*stabtype) (Symbol);
 	Xinterface x;
 	unsigned quadld:1;	/* long double is IEEE quad, kept as Quad */
+	unsigned pccbitfields:1;	/* lay out bit fields as gcc and clang do */
+	unsigned unnamedbfalign:1;	/* ... and unnamed ones align the structure */
 } Interface;
 typedef struct binding {
 	char *name;
