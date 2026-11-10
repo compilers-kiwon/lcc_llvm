@@ -37,5 +37,26 @@ interfaces use time_t: they are built with 64-bit time_t. glibc itself
 works with lcc's objects. lcc cannot have a 64-bit time_t: glibc selects
 its 64-bit time functions with GNU __asm__ labels, which lcc lacks.
 
+LIMITATIONS
+
+lcc compiles C89 and does not accept some extensions of later C and of
+GNU C that glibc and Linux headers use:
+
+	long long constants (0xff00000000000000ull in bits/byteswap.h)
+	unnamed struct and union members (bits/struct_mutex.h on 32-bit
+	targets, bits/sigcontext.h, bits/termios-struct.h on RISC-V 32)
+	arrays of size 0 (bits/fcntl-linux.h, sys/ucontext.h on RISC-V 64)
+	named variadic macro parameters (MEMBERS... in linux/stddef.h)
+	__SIZE_TYPE__, which gcc and clang predefine (glob.h)
+
+So on the Linux targets, with the feature macros the lcc drivers define
+(_POSIX_SOURCE), the C89 headers and most POSIX.1 headers work, but
+netinet/in.h and glob.h do not, and neither does pthread.h on armhf and
+RISC-V 32 nor termios.h on RISC-V 32. Defining _DEFAULT_SOURCE or
+_GNU_SOURCE, or on the 32-bit targets and RISC-V 64 _POSIX_C_SOURCE=200809L
+or _XOPEN_SOURCE=700, makes more headers fail, among them signal.h,
+stdlib.h, sys/types.h, sys/wait.h, sys/socket.h, fcntl.h, semaphore.h
+and regex.h.
+
 Chris Fraser / cwf@aya.yale.edu
 David Hanson / drh@drhanson.net
