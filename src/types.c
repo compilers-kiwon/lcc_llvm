@@ -317,6 +317,9 @@ Field newfield(char *name, Type ty, Type fty) {
 int eqtype(Type ty1, Type ty2, int ret) {
 	if (ty1 == ty2)
 		return 1;
+	if (ty1->op == ENUM && ty1->type == ty2
+	||  ty2->op == ENUM && ty2->type == ty1)
+		return 1;	/* an enum is compatible with its integer type */
 	if (ty1->op != ty2->op)
 		return 0;
 	switch (ty1->op) {
@@ -364,7 +367,7 @@ Type promote(Type ty) {
 	ty = unqual(ty);
 	switch (ty->op) {
 	case ENUM:
-		return inttype;
+		return ty->type ? promote(ty->type) : inttype;
 	case INT:
 		if (ty->size < inttype->size)
 			return inttype;
@@ -393,8 +396,8 @@ Type signedint(Type ty) {
 	assert(0); return NULL;
 }
 Type compose(Type ty1, Type ty2) {
-	if (ty1 == ty2)
-		return ty1;
+	if (ty1 == ty2 || isenum(ty1) != isenum(ty2))
+		return ty1;	/* or an enum and its integer type */
 	assert(ty1->op == ty2->op);
 	switch (ty1->op) {
 	case POINTER:
@@ -445,7 +448,7 @@ int ttob(Type ty) {
 	case ARRAY: case STRUCT: case UNION:
 		return STRUCT;
 	case ENUM:
-		return INT + sizeop(inttype->size);
+		return ty->type ? ttob(ty->type) : INT + sizeop(inttype->size);
 	}
 	assert(0); return INT;
 }

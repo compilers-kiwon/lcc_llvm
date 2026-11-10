@@ -303,8 +303,8 @@ Type assign(Type xty, Tree e) {
 	&& (  (isconst(xty->type)    || !isconst(yty->type))
 	   && (isvolatile(xty->type) || !isvolatile(yty->type)))) {
 		Type lty = unqual(xty->type), rty = unqual(yty->type);
-		if (isenum(lty) && rty == inttype
-		||  isenum(rty) && lty == inttype) {
+		if (isenum(lty) && (rty == inttype || rty == unsignedtype)
+		||  isenum(rty) && (lty == inttype || lty == unsignedtype)) {
 			if (Aflag >= 1)
 				warning("assignment between `%t' and `%t' is compiler-dependent\n",
 					xty, yty);

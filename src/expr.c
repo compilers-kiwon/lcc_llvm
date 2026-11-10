@@ -582,7 +582,7 @@ Tree cast(Tree p, Type type) {
 				p = simplify(CVU, unsignedtype, p, NULL);
 			break;
 		case ENUM:
-			p = retype(p, inttype);
+			p = retype(p, src->type);
 			break;
 		case POINTER:
 			if (isint(dst) && src->size > dst->size)

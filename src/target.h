@@ -93,5 +93,6 @@ Interface I(id##IR) = { \
 	{0},			/* x */ \
 	quad,			/* quadld */ \
 	1,			/* pccbitfields */ \
-	ubf			/* unnamedbfalign */ \
+	ubf,			/* unnamedbfalign */ \
+	1			/* unsignedenums */ \
 }

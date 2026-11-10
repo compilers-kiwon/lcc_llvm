@@ -1154,7 +1154,7 @@ Type enumdcl(void) {
 		tag = "";
 	if (t == '{') {
 		static char follow[] = { IF, 0 };
-		int n = 0;
+		int n = 0, neg = 0;
 		long k = -1;
 		List idlist = 0;
 		ty = newstruct(ENUM, tag);
@@ -1182,6 +1182,8 @@ Type enumdcl(void) {
 			p->type = ty;
 			p->sclass = ENUM;
 			p->u.value = k;
+			if (k < 0)
+				neg = 1;
 			idlist = append(p, idlist);
 			n++;
 			if (Aflag >= 2 && n == 128)
@@ -1193,7 +1195,8 @@ Type enumdcl(void) {
 				warning("non-ANSI trailing comma in enumerator list\n");
 		}
 		test('}', follow);
-		ty->type = inttype;
+		/* gcc and clang: unsigned int if no constant is negative */
+		ty->type = IR->unsignedenums && !neg ? unsignedtype : inttype;
 		ty->size = ty->type->size;
 		ty->align = ty->type->align;
 		ty->u.sym->u.idlist = ltov(&idlist, PERM);
