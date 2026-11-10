@@ -262,14 +262,10 @@ long locales(int which, char *buf) {
 	return 0;
 }
 
-/* limits.h and float.h.  On ARM, glibc aligns jmp_buf to 8 with an
-   __attribute__, which other compilers than gcc and clang do not see:
-   its size differs by the padding at its end */
-#ifdef __ARM_EABI__
-#define JMPBUFSIZE 0
-#else
-#define JMPBUFSIZE sizeof(jmp_buf)
-#endif
+/* limits.h and float.h, and the sizes and alignments of the types.  On
+   ARM, glibc aligns jmp_buf to 8 with an __attribute__, which lcc does not
+   see; lcc has its own bits/setjmp.h for armhf */
+struct jbalign { char c; jmp_buf jb; };
 static double limitsv[] = {
 	CHAR_BIT, SCHAR_MIN, SCHAR_MAX, UCHAR_MAX, CHAR_MIN, CHAR_MAX, MB_LEN_MAX,
 	SHRT_MIN, SHRT_MAX, USHRT_MAX, INT_MIN, INT_MAX, UINT_MAX,
@@ -284,7 +280,7 @@ static double limitsv[] = {
 	SEEK_SET, SEEK_CUR, SEEK_END, _IOFBF, _IOLBF, _IONBF, EXIT_SUCCESS, EXIT_FAILURE, RAND_MAX,
 	CLOCKS_PER_SEC, SIGABRT, SIGFPE, SIGILL, SIGINT, SIGSEGV, SIGTERM,
 	LC_ALL, LC_COLLATE, LC_CTYPE, LC_MONETARY, LC_NUMERIC, LC_TIME,
-	sizeof(size_t), sizeof(ptrdiff_t), sizeof(wchar_t), JMPBUFSIZE, sizeof(fpos_t),
+	sizeof(size_t), sizeof(ptrdiff_t), sizeof(wchar_t), sizeof(jmp_buf), offsetof(struct jbalign, jb), sizeof(fpos_t),
 	sizeof(time_t), sizeof(clock_t), sizeof(div_t), sizeof(ldiv_t), sizeof(sig_atomic_t),
 	offsetof(struct tm, tm_year), offsetof(div_t, rem), offsetof(struct lconv, decimal_point)
 };
