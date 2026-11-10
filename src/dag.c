@@ -383,8 +383,10 @@ Node listnodes(Tree tp, int tlab, int flab) {
 		      	q = bittree(BAND,
 		      		shtree(RSH, q, cnsttree(inttype, (long)fieldright(tp->u.field))),
 		      		cnsttree(unsignedtype, (unsigned long)fieldmask(tp->u.field)));
-		      	if (unqual(tp->type) == inttype)	/* promoted, see field() */
-		      		q = cast(q, inttype);
+		      	/* promoted, see field(); a long of the size of int may
+		      	   have taken the type without a conversion */
+		      	if (unqual(tp->type)->op == INT)
+		      		q = cast(q, unqual(tp->type));
 		      }
 		      assert(tlab == 0 && flab == 0);
 		      p = listnodes(q, 0, 0); } break;
