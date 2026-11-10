@@ -78,7 +78,9 @@ $Brcc$E::	$Bmain$O $Blibrcc$A $(EXTRAOBJS)
 $Blibrcc$A:	$(RCCOBJS)
 		$(AR) $@ $(RCCOBJS); $(RANLIB) $@ || true
 
-$(RCCOBJS):	src/c.h src/ops.h src/token.h src/config.h
+$(RCCOBJS):	src/c.h src/ops.h src/token.h src/config.h src/quad.h
+$Babi$O $Bsysv$O $Baapcs64$O $Briscv$O $Barm$O $Bllvm$O $Bmlir$O:	src/abi.h
+$Bllvm$O $Bmlir$O:	src/target.h
 
 $Balloc$O:	src/alloc.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/alloc.c
 $Bbind$O:	src/bind.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/bind.c
