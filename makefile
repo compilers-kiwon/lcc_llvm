@@ -17,7 +17,7 @@ B=$(BUILDDIR)/
 T=$(TSTDIR)/
 
 what:
-	-@echo make all rcc lburg cpp lcc bprint liblcc triple clean clobber
+	-@echo make all rcc lburg cpp lcc bprint liblcc headers triple clean clobber
 
 all::	rcc lburg cpp lcc bprint liblcc
 
@@ -27,6 +27,22 @@ cpp:	$Bcpp$E
 lcc:	$Blcc$E
 bprint:	$Bbprint$E
 liblcc:	$Bliblcc$A
+
+# headers copies the target's own headers, with their subdirectories, to
+# $(BUILDDIR)/include: include/llvm/TARGET for HOSTFILE=etc/llvm-TARGET.c
+# or etc/mlir-TARGET.c, or the directory INCDIR
+headers:
+	@d='$(INCDIR)'; \
+	if [ -z "$$d" ]; then \
+		d=`echo '$(HOSTFILE)' | sed -n -e 's|^\(.*/\)\{0,1\}llvm-\(.*\)\.c$$|include/llvm/\2|p' \
+			-e 's|^\(.*/\)\{0,1\}mlir-\(.*\)\.c$$|include/llvm/\2|p'`; \
+	fi; \
+	if [ -z "$$d" ] || [ ! -d "$$d" ]; then \
+		echo "make headers: give HOSTFILE=etc/llvm-TARGET.c, etc/mlir-TARGET.c or INCDIR=dir" 1>&2; \
+		exit 1; \
+	fi; \
+	echo "mkdir -p $Binclude && cp -R $$d/. $Binclude/"; \
+	mkdir -p $Binclude && cp -R $$d/. $Binclude/
 
 RCCOBJS=$Balloc$O \
 	$Bbind$O \
