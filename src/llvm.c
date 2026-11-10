@@ -476,8 +476,15 @@ static void allocvaslots(Node p) {
 	&& (*tg->abi->needsslot)(ty = unqual(freturn(p->syms[0]->type)->type)))
 		newslot(p, "va", ty);
 	if (generic(p->op) == ARG && optype(p->op) == B && vaslot(p) == NULL) {
+		/* by address with the registers all left, or none (on RV32,
+		   {double, double} goes in FP registers or by address) */
+		int n;
 		(*tg->abi->init)(&r);
-		if ((*tg->abi->arg)(p->syms[0]->type, &r, &part) == ABYREF)
+		n = (*tg->abi->arg)(p->syms[0]->type, &r, &part);
+		(*tg->abi->init)(&r);
+		r.gp = r.fp = 0;
+		r.va = 1;
+		if (n == ABYREF || (*tg->abi->arg)(p->syms[0]->type, &r, &part) == ABYREF)
 			newslot(p, "cp", p->syms[0]->type);
 	}
 	allocvaslots(p->kids[0]);
@@ -716,15 +723,15 @@ static char *vaaddr64(char *ap, Type ty, char *slot) {
  * argument in memory, where the callee has stored the argument
  * registers next to the arguments on the stack; each takes a multiple
  * of unit bytes, and starts at a multiple of its alignment if that is
- * more.  A structure of more than byref bytes, if byref is not 0, is
- * passed by the address of a copy (RISC-V: unit 8, byref 16; ARM: unit
- * 4, byref 0).
+ * more.  An argument of more than byref bytes, if byref is not 0, is
+ * passed by the address of a copy (RV64: unit 8, byref 16; RV32: unit 4,
+ * byref 8; ARM: unit 4, byref 0).
  */
 static char *vaaddrptr(char *ap, Type ty, int unit, int byref) {
 	int size, align = ty->align;
 	char *p = newreg(), *next = newreg();
 
-	byref = byref && isstruct(ty) && ty->size > byref;
+	byref = byref && ty->size > byref;
 	size = byref ? unit : roundup(ty->size, unit);
 	inst("%s = load ptr, ptr %s", p, ap);
 	if (!byref && align > unit) {
@@ -781,6 +788,8 @@ static char *emitbuiltin(Node p, int b) {
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
 	else if (tg->abi == &riscv64abi)
 		v = vaaddrptr(ap, ty, 8, 16);
+	else if (tg->abi == &riscv32abi)
+		v = vaaddrptr(ap, ty, 4, 8);
 	else if (tg->abi == &armabi || tg->abi == &armsoftabi)
 		v = vaaddrptr(ap, ty, 4, 0);
 	else

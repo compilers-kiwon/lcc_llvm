@@ -1466,15 +1466,15 @@ static char *vaaddr(char *ap, Type ty, char *slot) {
  * the next argument in memory, where the callee has stored the argument
  * registers next to the arguments on the stack; each takes a multiple
  * of unit bytes, and starts at a multiple of its alignment if that is
- * more.  A structure of more than byref bytes, if byref is not 0, is
- * passed by the address of a copy (RISC-V: unit 8, byref 16; ARM: unit
- * 4, byref 0).
+ * more.  An argument of more than byref bytes, if byref is not 0, is
+ * passed by the address of a copy (RV64: unit 8, byref 16; RV32: unit 4,
+ * byref 8; ARM: unit 4, byref 0).
  */
 static char *vaaddrptr(char *ap, Type ty, int unit, int byref) {
 	int align = ty->align;
 	char *p = newreg();
 
-	byref = byref && isstruct(ty) && ty->size > byref;
+	byref = byref && ty->size > byref;
 	inst("%s = llvm.load %s : !llvm.ptr -> !llvm.ptr", p, ap);
 	if (!byref && align > unit) {	/* round up to the alignment */
 		char *x = newreg(), *y = newreg(), *z = newreg(), *w = newreg();
@@ -1652,6 +1652,8 @@ static char *emitbuiltin(Node p, int b) {
 		v = vaaddr64(ap, ty, isstruct(ty) ? slot : NULL);
 	else if (tg->abi == &riscv64abi)
 		v = vaaddrptr(ap, ty, 8, 16);
+	else if (tg->abi == &riscv32abi)
+		v = vaaddrptr(ap, ty, 4, 8);
 	else if (tg->abi == &armabi || tg->abi == &armsoftabi)
 		v = vaaddrptr(ap, ty, 4, 0);
 	else

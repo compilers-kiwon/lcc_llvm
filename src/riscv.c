@@ -4,8 +4,9 @@
 static char rcsid[] = "$Id$";
 
 /*
- * The RISC-V calling convention for LP64D (rv64gc Linux), as clang
- * passes structures in LLVM IR, with XLEN 8 and FLEN 8.
+ * The RISC-V calling convention for LP64D (rv64gc Linux, riscv64abi) and
+ * ILP32D (rv32gc Linux, riscv32abi), as clang passes structures in LLVM
+ * IR, with XLEN 8 or 4 and FLEN 8.
  *
  * A structure whose scalars, nested structures and arrays flattened, are
  * one float or double, two of them, or one of them and one integer of
@@ -13,18 +14,21 @@ static char rcsid[] = "$Id$";
  * FP and integer registers, one LLVM argument each, if they are left
  * and it is not a variadic argument; its result is that scalar or a
  * literal structure of the two.  Others go by the integer convention: at
- * most XLEN bytes in i64, at most 2*XLEN in [2 x i64] (i128 if aligned
- * to 16), else by the address of a copy made by the caller, and returned
- * at an address the caller passes (sret).  Unions and pointers never
+ * most XLEN bytes in i64 (i32 on RV32), at most 2*XLEN in [2 x i64] (i128
+ * if aligned to 16; [2 x i32] and i64 on RV32), else by the address of a
+ * copy made by the caller, and returned at an address the caller passes
+ * (sret); so is a scalar of more than 2*XLEN bytes, a long double on RV32.  Unions and pointers never
  * go in FP registers.  LLVM assigns the registers; they are counted
- * here only to decide between the conventions.  Arguments of type i32
- * are sign-extended to XLEN, unsigned ones too (signext).  Variadic
+ * here only to decide between the conventions.  On RV64, arguments of
+ * type i32 are sign-extended to XLEN, unsigned ones too (signext).  Variadic
  * arguments go in integer registers, so a call without a prototype
  * passes its (promoted) arguments as fixed ones, as clang does.
  */
 
-#define XLEN 8
 #define FLEN 8
+
+static int xlen = 8;	/* XLEN: 8, or 4 while riscv32abi works */
+#define XLEN xlen
 
 struct leaf {
 	int off, size, fp;
@@ -94,13 +98,16 @@ static void takegp(struct regs *r, int n) {
 }
 
 static void scalar(char *t, struct regs *r) {
+	int size = t[0] == 'i' ? atoi(t + 1)/8 : strcmp(t, "float") == 0 ? 4
+		: strcmp(t, "double") == 0 ? 8 : strcmp(t, "fp128") == 0 ? 16 : XLEN;
+
 	if ((strcmp(t, "float") == 0 || strcmp(t, "double") == 0)
 	&& !r->va && r->fp > 0)
 		r->fp--;
-	else if (strcmp(t, "fp128") == 0 || strcmp(t, "i128") == 0)
-		takegp(r, 2);
+	else if (size > 2*XLEN)
+		takegp(r, 1);	/* by address */
 	else
-		takegp(r, 1);
+		takegp(r, (size + XLEN - 1)/XLEN);
 }
 
 /* intconv - the part of ty by the integer convention, or 0 if it is
@@ -109,11 +116,11 @@ static int intconv(Type ty, struct part *part) {
 	if (ty->size > 2*XLEN)
 		return 0;
 	if (ty->align > XLEN)
-		abi_elems(part, ty, 0, 1, 2*XLEN, "i128");
+		abi_elems(part, ty, 0, 1, 2*XLEN, XLEN == 8 ? "i128" : "i64");
 	else if (ty->size <= XLEN)
-		abi_elems(part, ty, 0, 1, XLEN, "i64");
+		abi_elems(part, ty, 0, 1, XLEN, XLEN == 8 ? "i64" : "i32");
 	else
-		abi_elems(part, ty, 0, 2, XLEN, "i64");
+		abi_elems(part, ty, 0, 2, XLEN, XLEN == 8 ? "i64" : "i32");
 	return 1;
 }
 
@@ -176,3 +183,31 @@ static char *extattr(char *t) {
 }
 
 struct abi riscv64abi = { initregs, scalar, arg, ret, needsslot, extattr, 1, 0, 1, 8 };
+
+/* riscv32abi: the same with XLEN 4, and no extension of i32 */
+
+static void scalar32(char *t, struct regs *r) {
+	xlen = 4;
+	scalar(t, r);
+	xlen = 8;
+}
+
+static int arg32(Type ty, struct regs *r, struct part **part) {
+	int n;
+
+	xlen = 4;
+	n = arg(ty, r, part);
+	xlen = 8;
+	return n;
+}
+
+static int ret32(Type ty, int vfunc, struct part *part) {
+	int n;
+
+	xlen = 4;
+	n = ret(ty, vfunc, part);
+	xlen = 8;
+	return n;
+}
+
+struct abi riscv32abi = { initregs, scalar32, arg32, ret32, needsslot, NULL, 1, 0, 1, 4 };

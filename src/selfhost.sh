@@ -7,8 +7,9 @@
 # the host compiler (stage 1), as by make BUILDDIR=builddir
 # HOSTFILE=etc/llvm-TARGET.c all (etc/mlir-TARGET.c) with
 # include/llvm/TARGET/*.h in builddir/include; TARGET is x86_64-linux, or
-# aarch64-linux, riscv64-linux or armhf-linux, whose stage 1 is a cross
-# compiler.  Stage 2 is this
+# aarch64-linux, riscv64-linux, armhf-linux or riscv32-linux, whose
+# stage 1 is a cross compiler (riscv32-linux finds its toolchain at
+# builddir/riscv32).  Stage 2 is this
 # repository built by the stage 1 lcc in outdir/2, and stage 3 is built by
 # the stage 2 lcc in outdir/3; outdir is builddir/selfhost by default.
 #
@@ -66,6 +67,9 @@ aarch64-linux|riscv64-linux)
 armhf-linux)
 	QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
 	export QEMU_LD_PREFIX ;;
+riscv32-linux)	# builddir/riscv32 is the toolchain
+	QEMU_LD_PREFIX=`cd $B/riscv32 && pwd`/sysroot
+	export QEMU_LD_PREFIX ;;
 *)	echo "$0: unknown target $X" 1>&2; exit 2 ;;
 esac
 HOSTFILE=etc/$TGT-$X.c
@@ -76,6 +80,7 @@ stage() {
 	rm -rf $D
 	mkdir -p $D/include || exit 1
 	cp include/llvm/$X/*.h $D/include/ || exit 1
+	[ -e $B/riscv32 ] && ln -s `cd $B/riscv32 && pwd` $D/riscv32
 	echo "stage $1: building with $2/lcc"
 	if ! make BUILDDIR=$D HOSTFILE=$HOSTFILE \
 	    CC="$2/lcc -Wo-lccdir=$2" CFLAGS= LDFLAGS= all >$D/make.log 2>&1; then

@@ -4,7 +4,7 @@
 # usage: src/run-llvm.sh [-b builddir] [-o outdir] [-t target] [-q] suite [dir] [name ...]
 #
 # target is that of the lcc in builddir: x86_64-linux (the default),
-# aarch64-linux, riscv64-linux, armhf-linux or cortexm3-eabi, whose
+# aarch64-linux, riscv64-linux, armhf-linux, riscv32-linux or cortexm3-eabi, whose
 # programs run with qemu (cortexm3-eabi on qemu-system-arm with
 # semihosting; its test drivers are built by src/cm3cc.sh); $TARGET
 # too.  The lcc may be a program of that target itself (src/selfhost.sh -x).
@@ -127,6 +127,15 @@ armhf-linux)
 	case "$DRVCC" in
 	clang)	DRVCC="clang --target=arm-linux-gnueabihf -fuse-ld=lld" ;;
 	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -U_FILE_OFFSET_BITS" ;;
+	esac ;;
+riscv32-linux)	# BUILDDIR/riscv32 is the toolchain, see etc/llvm-riscv32-linux.c
+	R32=`cd $BUILDDIR/riscv32 && pwd`
+	RUN="qemu-riscv32 -L $R32/sysroot" NM=llvm-nm-18
+	QEMU_LD_PREFIX=$R32/sysroot
+	export QEMU_LD_PREFIX
+	case "$DRVCC" in
+	clang)	DRVCC="clang --target=riscv32-unknown-linux-gnu -march=rv32gc -mabi=ilp32d --gcc-toolchain=$R32 --sysroot=$R32/sysroot -fuse-ld=lld" ;;
+	gcc)	DRVCC="$R32/bin/riscv32-unknown-linux-gnu-gcc -fPIE -pie -std=gnu89" ;;
 	esac ;;
 cortexm3-eabi)	# no OS: newlib and semihosting on qemu's mps2-an385 board
 	RUN="qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none -semihosting-config enable=on,target=native -kernel"
