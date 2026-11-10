@@ -229,6 +229,12 @@ expand(Tokenrow *trp, Nlist *np)
 			/* gatherargs has already pushed trp->tr to the next token */
 			return;
 		}
+		if (narg == 0 && rowlen(np->ap) == 1) {
+			/* S() has one empty argument, as gcc and clang take it */
+			atr[0] = new(Tokenrow);
+			maketokenrow(1, atr[0]);
+			narg = 1;
+		}
 		if (np->flag&ISVARMAC)
 			narg = varargs(atr, narg, rowlen(np->ap));
 		if (narg != rowlen(np->ap)) {
