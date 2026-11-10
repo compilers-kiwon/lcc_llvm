@@ -162,7 +162,6 @@ excluded() {
 	case "$1" in
 	fp-cmp-[123].c)	echo "signal handler of an incompatible type" ;;
 	pr15262-1.c)	echo "implicitly declared malloc assigned to a pointer" ;;
-	enum-3.c)	echo "relies on an enum type being compatible with int" ;;
 	*)		return 1 ;;
 	esac
 	return 0
