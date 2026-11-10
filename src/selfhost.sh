@@ -6,8 +6,9 @@
 # builddir has lcc for llvm/TARGET (or mlir/TARGET with -t mlir) built by
 # the host compiler (stage 1), as by make BUILDDIR=builddir
 # HOSTFILE=etc/llvm-TARGET.c all (etc/mlir-TARGET.c) with
-# include/llvm/TARGET/*.h in builddir/include; TARGET is x86_64-linux, or
-# aarch64-linux, riscv64-linux, armhf-linux or riscv32-linux, whose
+# include/llvm/TARGET copied to builddir/include (with its subdirectories:
+# cp -R include/llvm/TARGET/. builddir/include); TARGET is x86_64-linux,
+# or aarch64-linux, riscv64-linux, armhf-linux or riscv32-linux, whose
 # stage 1 is a cross compiler (riscv32-linux finds its toolchain at
 # builddir/riscv32).  Stage 2 is this
 # repository built by the stage 1 lcc in outdir/2, and stage 3 is built by
@@ -79,7 +80,7 @@ stage() {
 	D=$O/$1
 	rm -rf $D
 	mkdir -p $D/include || exit 1
-	cp include/llvm/$X/*.h $D/include/ || exit 1
+	cp -R include/llvm/$X/. $D/include/ || exit 1
 	[ -e $B/riscv32 ] && ln -s `cd $B/riscv32 && pwd` $D/riscv32
 	echo "stage $1: building with $2/lcc"
 	if ! make BUILDDIR=$D HOSTFILE=$HOSTFILE \
