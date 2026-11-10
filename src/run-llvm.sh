@@ -122,11 +122,12 @@ armhf-linux)
 	RUN="qemu-arm -L /usr/arm-linux-gnueabihf" NM=llvm-nm-18
 	QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
 	export QEMU_LD_PREFIX
-	# lcc's time_t and off_t have 32 bits, as clang's; Ubuntu's gcc
-	# has 64 (_TIME_BITS=64, _FILE_OFFSET_BITS=64)
+	# lcc's off_t has 64 bits and time_t 32 (see README); clang's off_t
+	# has 32 by default, Ubuntu's gcc's time_t 64 (-U_TIME_BITS also
+	# removes _FILE_OFFSET_BITS)
 	case "$DRVCC" in
-	clang)	DRVCC="clang --target=arm-linux-gnueabihf -fuse-ld=lld" ;;
-	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -U_FILE_OFFSET_BITS" ;;
+	clang)	DRVCC="clang --target=arm-linux-gnueabihf -D_FILE_OFFSET_BITS=64 -fuse-ld=lld" ;;
+	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -D_FILE_OFFSET_BITS=64" ;;
 	esac ;;
 riscv32-linux)	# BUILDDIR/riscv32 is the toolchain, see etc/llvm-riscv32-linux.c
 	R32=`cd $BUILDDIR/riscv32 && pwd`

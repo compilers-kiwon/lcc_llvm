@@ -19,5 +19,23 @@ distribute lcc or works derived from lcc.
 doc/install.html is an HTML file that gives a complete description of
 the distribution and installation instructions.
 
+ARM hard-float Linux (llvm/armhf-linux, mlir/armhf-linux): lcc compiles
+with _FILE_OFFSET_BITS=64, so off_t has 64 bits, and time_t has 32 bits.
+
+ONLY OBJECTS BUILT WITH
+
+	clang --target=arm-linux-gnueabihf -D_FILE_OFFSET_BITS=64
+	arm-linux-gnueabihf-gcc -U_TIME_BITS -D_FILE_OFFSET_BITS=64
+
+CAN BE LINKED WITH OBJECTS BUILT BY lcc FOR THIS TARGET. With their
+defaults, clang's off_t has 32 bits and Ubuntu's gcc's time_t has 64
+bits (gcc there defines _TIME_BITS=64 and _FILE_OFFSET_BITS=64, and
+-U_TIME_BITS removes both). Passing off_t, time_t or a type that contains
+them (struct stat, fpos_t, struct timeval, ...) between such objects
+and lcc's goes wrong. The same holds for Ubuntu's armhf libraries whose
+interfaces use time_t: they are built with 64-bit time_t. glibc itself
+works with lcc's objects. lcc cannot have a 64-bit time_t: glibc selects
+its 64-bit time functions with GNU __asm__ labels, which lcc lacks.
+
 Chris Fraser / cwf@aya.yale.edu
 David Hanson / drh@drhanson.net

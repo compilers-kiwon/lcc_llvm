@@ -23,10 +23,12 @@ char *cpp[] = { LCCDIR "cpp",
 	"-D__ARM_ARCH_7A__", "-D__ARM_PCS_VFP", "-D__VFP_FP__",
 	"-D__SIZEOF_POINTER__=4", "-D__CHAR_UNSIGNED__",
 	"-D__ELF__", "-D__signed__=signed",
-	/* not _TIME_BITS=64 and _FILE_OFFSET_BITS=64, which Ubuntu's gcc
-	   defines: glibc renames time() and the like for them with __asm__
-	   labels, and for other compilers to names it does not declare;
-	   time_t and off_t have 32 bits, as with clang */
+	/* off_t has 64 bits, time_t 32: Ubuntu's gcc defines also
+	   _TIME_BITS=64, but glibc renames time() and the like for it with
+	   __asm__ labels, and for other compilers to names it does not
+	   declare.  Objects from clang -D_FILE_OFFSET_BITS=64 and gcc
+	   -U_TIME_BITS -D_FILE_OFFSET_BITS=64 match lcc's (see README) */
+	"-D_FILE_OFFSET_BITS=64",
 	"$1", "$2", "$3", 0 };
 #ifndef SYSROOT
 #define SYSROOT "/usr/arm-linux-gnueabihf"
