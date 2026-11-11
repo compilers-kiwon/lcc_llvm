@@ -19,6 +19,10 @@ PV = "4.2+git"
 B = "${WORKDIR}/build"
 EXTRA_OEMAKE = "-r -C ${S} BUILDDIR=${B}"
 
+# The makefile does not know the flags an object was compiled with: when
+# they change, make would keep the old objects. Every compile starts empty.
+do_compile[cleandirs] = "${B}"
+
 # The target as lcc names it (rcc -target=llvm/LCCTARGET, etc/llvm-LCCTARGET.c
 # and include/llvm/LCCTARGET): one of lcc's Linux targets, or none.
 def lcc_target(d):

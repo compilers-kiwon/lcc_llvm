@@ -30,18 +30,13 @@ OECFLAGS = "-DOEHOST='\"llvm-${LCCTARGET}.c\"' -DOECC='\"${TARGET_PREFIX}gcc\"'"
 EXTRA_OEMAKE += "HOSTFILE=etc/oe-linux.c CC='${BUILD_CC}' \
                 LD='${BUILD_CC}' LDFLAGS='${BUILD_LDFLAGS}'"
 
-# lcc's makefile builds with -g alone; Yocto optimizes. lcc's original back
-# ends, which are in rcc too, read a double's words through an unsigned *,
-# which gcc -O2 breaks unless aliasing is left alone.
-LCC_CFLAGS = "${BUILD_CFLAGS} -fno-strict-aliasing"
-
 do_compile() {
-    oe_runmake "CFLAGS=${LCC_CFLAGS} ${OECFLAGS}" rcc lcc cpp
+    oe_runmake "CFLAGS=${BUILD_CFLAGS} ${OECFLAGS}" rcc lcc cpp
     oe_runmake INCDIR=include/llvm/${LCCTARGET} headers
     # the mlir driver: the same lcc.o with the mlir host file; rcc, cpp and
     # the headers are the same for both back ends
     if ${@bb.utils.contains('PACKAGECONFIG', 'mlir', 'true', 'false', d)}; then
-        ${BUILD_CC} ${LCC_CFLAGS} -DOEHOST='"mlir-${LCCTARGET}.c"' \
+        ${BUILD_CC} ${BUILD_CFLAGS} -DOEHOST='"mlir-${LCCTARGET}.c"' \
             -DOECC='"${TARGET_PREFIX}gcc"' \
             -c -o ${B}/host-mlir.o ${S}/etc/oe-linux.c
         ${BUILD_CC} ${BUILD_LDFLAGS} -o ${B}/lcc-mlir ${B}/lcc.o ${B}/host-mlir.o

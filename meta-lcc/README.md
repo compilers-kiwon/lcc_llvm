@@ -107,11 +107,11 @@ GCC 16.2로 빌드했고 [scripts/check-tests.sh](scripts/check-tests.sh)로
 
 | `MACHINE` | 드라이버 | lcc | unit | c-testsuite | torture | llvm-bench |
 | :- | :- | :- | :- | :- | :- | :- |
-| `qemux86-64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuarm64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuriscv64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuarm` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuriscv32` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemux86-64` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuarm64` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuriscv64` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuarm` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuriscv32` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
 
 lcc의 MLIR 출력은 LLVM 21의 MLIR에 맞춰 만들었는데, Yocto의 MLIR 23에서도 고칠 것 없이 통과했다.
 
