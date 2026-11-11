@@ -13,6 +13,17 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 
 ## 시작하기
 
+**릴리스 파일로.** 빌드할 것 없이 x86_64 리눅스에서 바로 쓴다. 타깃·백엔드마다 압축 파일이 하나씩
+[Releases](https://github.com/compilers-kiwon/lcc_llvm/releases)에 있다. llvm 드라이버는 clang 18이, mlir
+드라이버는 LLVM 21이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)).
+
+```bash
+curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.1/lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
+tar -xzf lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
+L=$PWD/lcc-v4.2-llvm.1-llvm-x86_64-linux
+LCCDIR=$L $L/lcc -o hello hello.c && ./hello
+```
+
 **x86_64 리눅스에서 소스로.** clang 18과 make가 있으면 된다.
 
 ```bash
@@ -151,7 +162,8 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
 - 부동소수점 상수의 넘침·아래 넘침 경고가 gcc·clang과 같다.
 
 나머지 변경은 원본의 버그 수정이며 git 이력에 있다. 64비트 호스트에서 드러나는 것, `gcc -O2`로
-빌드할 때 드러나는 것, 원래 x86/linux 백엔드의 레지스터 할당 등이다.
+빌드할 때 드러나는 것, ASan·UBSan으로 찾은 정의되지 않은 동작, 상수 표의 0.0, 파일 수준 암묵적 선언,
+원래 백엔드(x86/linux, sparc)의 레지스터 할당 등이다.
 
 ## 시험
 
@@ -159,7 +171,7 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
 
 | 묶음 | 내용 | 수 |
 | :- | :- | :- |
-| `lcc` | lcc 자체의 `tst/*.c`. 표준 출력과 컴파일러 메시지를 기준 파일과 비교 | 18 |
+| `lcc` | lcc 자체의 `tst/*.c`. 표준 출력과 컴파일러 메시지를 기준 파일과 비교 | 19 |
 | `unit` | `tst/llvm/NAME.c`를 lcc로, `NAME-drv.c`를 clang이나 gcc로 컴파일해 링크하고 결과 확인 | 25 |
 | `c-testsuite` | [c-testsuite](https://github.com/c-testsuite/c-testsuite)의 C89 시험 | 144 |
 | `torture` | GCC torture 시험(LLVM test-suite 안)의 C89 시험 | 618 |
@@ -198,7 +210,8 @@ GitHub Actions가 `master`에 push하거나 PR을 열 때마다 [ci.yml](.github
 타깃 하나의 설치·빌드는 [ci-target.sh](.github/scripts/ci-target.sh)가 하므로 로컬에서도 같은 명령으로 재현할 수 있다.
 
 `v`로 시작하는 태그를 push하면 [release.yml](.github/workflows/release.yml)이 타깃·백엔드마다 lcc를 빌드하고
-시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다.
+시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다. 첫 릴리스는
+[v4.2-llvm.1](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.1)이다.
 
 ## Yocto
 
@@ -259,9 +272,11 @@ RISC-V 64에서 `_POSIX_C_SOURCE=200809L`이나 `_XOPEN_SOURCE=700`을 정의하
 | `etc/oe-linux.c` | Yocto 툴체인용 드라이버 |
 | `etc/cortexm3/` | Cortex-M3 보드 파일 |
 | `include/llvm/T/` | 타깃별 자체 헤더 |
+| `tst/` | lcc 자체의 시험(`tst/*.c`, 입력 `.0`) |
 | `tst/llvm/` | 단위 시험 |
 | `llvm/T/tst/` | 타깃별 `tst/*.c` 기준 출력 |
 | `meta-lcc/` | Yocto 레이어 |
+| `.github/workflows/`, `.github/scripts/` | CI·릴리스 워크플로와 그 스크립트 |
 
 ## 원본 lcc 4.2 README (번역)
 
