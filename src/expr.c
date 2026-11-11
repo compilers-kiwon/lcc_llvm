@@ -443,9 +443,14 @@ static Tree primary(void) {
 		   if (tsym->sclass == ENUM)
 		   	p = consttree(tsym->u.value, inttype);
 		   else {
-		   	if (tsym->sclass == TYPEDEF)
+		   	if (tsym->sclass == TYPEDEF) {
 		   		error("illegal use of type name `%s'\n", tsym->name);
-		   	p = idtree(tsym);
+		   		/* go on with an object of that type: a typedef at
+		   		   file scope has no name for a back end */
+		   		p = idtree(tsym->scope == GLOBAL
+		   			? genident(STATIC, tsym->type, GLOBAL) : tsym);
+		   	} else
+		   		p = idtree(tsym);
 		   } break;
 	case FIRSTARG:
 		if (level > PARAM && cfunc && cfunc->u.f.callee[0])
