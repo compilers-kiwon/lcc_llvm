@@ -380,6 +380,29 @@ static Tree primary(void) {
 		   	p = idtree(funcarray());
 		   	break;
 		   }
+		   if (tsym == NULL && level == GLOBAL && getchr() == '(') {
+			/* at file scope, as in sizeof f(), the implicit
+			   declaration is one at file scope, as dclglobal makes
+			   it: a single symbol, the one in externals if there */
+			Symbol p = lookup(token, externals);
+			if (Aflag >= 1)
+				warning("missing prototype\n");
+			if (p) {
+				if (!eqtype(p->type, func(inttype, NULL, 1), 1))
+					warning("implicit declaration of `%s' does not match previous declaration at %w\n", p->name, &p->src);
+				p = relocate(token, externals, identifiers);
+			} else {
+				p = install(token, &identifiers, GLOBAL, PERM);
+				p->type = func(inttype, NULL, 1);
+				p->sclass = EXTERN;
+				p->src = src;
+				(*IR->defsymbol)(p);
+			}
+			t = gettok();
+			if (xref)
+				use(p, src);
+			return idtree(p);
+		   }
 		   if (tsym == NULL)
 		   	{
 				Symbol p = install(token, &identifiers, level, PERM);

@@ -84,3 +84,8 @@ char *fplus3(void) { return (char *)helper - 2; }
 char *fhelper(void) { return (char *)helper; }
 
 int callhelper(int x) { counter++; return helper(x) + counter; }
+
+/* a function implicitly declared at file scope, in sizeof, is the one
+   defined later: lcc kept two symbols and declared it twice */
+int implsize = sizeof fileimpl(1);
+int fileimpl(int x) { return x + 7; }

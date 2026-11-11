@@ -14,7 +14,8 @@ unsigned char retuc(int);
 short rets(int);
 unsigned short retus(int);
 int callearly(int, int), add2(int, int), sub2(int, int), callops(int, int, int);
-int iseven(int), callhelper(int);
+int iseven(int), callhelper(int), fileimpl(int);
+extern int implsize;
 char *fplus1(void), *fplus2(void), *fplus3(void), *fhelper(void);
 extern int (*early[])();
 extern char *fplus[];
@@ -62,6 +63,8 @@ int main(void) {
 		CHK(ops[1](x, 3), x - 3);
 		CHK(iseven(i), i%2 == 0);
 	}
+	CHK(implsize, sizeof(int));
+	CHK(fileimpl(5), 12);
 	CHK(early[0] == later1, 1);
 	CHK(early[1] == later2, 1);
 	CHK(early[2] == noproto, 1);
