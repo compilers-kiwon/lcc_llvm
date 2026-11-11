@@ -169,7 +169,9 @@ $Bx86linux.c:	$Blburg$E src/x86linux.md; $Blburg src/x86linux.md $@
 $Bbprint$E:	$Bbprint$O;		$(LD) $(LDFLAGS) -o $@ $Bbprint$O 
 $Bops$E:	$Bops$O;		$(LD) $(LDFLAGS) -o $@ $Bops$O 
 
-$Bbprint$O:	etc/bprint.c src/profio.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ etc/bprint.c
+# bprint.c includes src/profio.c, which includes c.h
+$Bbprint$O:	etc/bprint.c src/profio.c src/c.h src/ops.h src/token.h src/config.h src/quad.h
+		$(CC) $(CFLAGS) -c -Isrc -o $@ etc/bprint.c
 $Bops$O:	etc/ops.c src/ops.h;		$(CC) $(CFLAGS) -c -Isrc -o $@ etc/ops.c
 
 $Blcc$E:	$Blcc$O $Bhost$O;	$(LD) $(LDFLAGS) -o $@ $Blcc$O $Bhost$O 
