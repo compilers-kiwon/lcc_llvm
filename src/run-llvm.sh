@@ -46,6 +46,12 @@
 # optimization (default -O0); optimized drivers rely on what the ABI
 # promises of lcc's code, as extended arguments and results.
 #
+# $OESYSROOT is the target sysroot of a Yocto build, for the lcc of its
+# toolchain (meta-lcc's lcc-cross), which $LCC then gives: its messages
+# and IR are checked as those of lcc itself, the programs run with
+# qemu on that sysroot, and $DRVCC must be the toolchain's gcc command.
+# meta-lcc/scripts/check-tests.sh sets all three.
+#
 # With lcc itself, each program is also compiled with -S and the LLVM IR
 # checked with opt -passes=verify ($OPT), since clang does not verify
 # the .ll it is given.  An lcc built with etc/mlir-x86_64-linux.c emits
@@ -86,7 +92,9 @@ c-testsuite|torture|llvm-bench)
 *)	sed -n '2,/^$/s/^# \{0,1\}//p' $0 1>&2; exit 2 ;;
 esac
 
-if [ -n "$LCC" ]; then
+if [ -n "$OESYSROOT" ]; then
+	ownlcc=1
+elif [ -n "$LCC" ]; then
 	ownlcc=0
 else
 	ownlcc=1
@@ -99,55 +107,68 @@ DRVCC=${DRVCC-clang}
 # tests can be compiled and the benchmarks run there at all, and these
 # are built with SMALL, LLVM's flag for small targets.
 NOOS= REFCC= SMALL=
-case $TARGET in
-x86_64-linux)
-	RUN= NM=nm ;;
-aarch64-linux)
-	RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu" NM=llvm-nm-18
-	# an lcc built by itself for AArch64 runs with binfmt_misc
-	QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
-	export QEMU_LD_PREFIX
-	case "$DRVCC" in
-	clang)	DRVCC="clang --target=aarch64-linux-gnu -fuse-ld=lld" ;;
-	gcc)	DRVCC=aarch64-linux-gnu-gcc ;;
-	esac ;;
-riscv64-linux)
-	RUN="qemu-riscv64 -L /usr/riscv64-linux-gnu" NM=llvm-nm-18
-	QEMU_LD_PREFIX=/usr/riscv64-linux-gnu
-	export QEMU_LD_PREFIX
-	case "$DRVCC" in
-	clang)	DRVCC="clang --target=riscv64-linux-gnu -fuse-ld=lld" ;;
-	gcc)	DRVCC=riscv64-linux-gnu-gcc ;;
-	esac ;;
-armhf-linux)
-	RUN="qemu-arm -L /usr/arm-linux-gnueabihf" NM=llvm-nm-18
-	QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
-	export QEMU_LD_PREFIX
-	# lcc's off_t has 64 bits and time_t 32 (see README); clang's off_t
-	# has 32 by default, Ubuntu's gcc's time_t 64 (-U_TIME_BITS also
-	# removes _FILE_OFFSET_BITS)
-	case "$DRVCC" in
-	clang)	DRVCC="clang --target=arm-linux-gnueabihf -D_FILE_OFFSET_BITS=64 -fuse-ld=lld" ;;
-	gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -D_FILE_OFFSET_BITS=64" ;;
-	esac ;;
-riscv32-linux)	# BUILDDIR/riscv32 is the toolchain, see etc/llvm-riscv32-linux.c
-	R32=`cd $BUILDDIR/riscv32 && pwd`
-	RUN="qemu-riscv32 -L $R32/sysroot" NM=llvm-nm-18
-	QEMU_LD_PREFIX=$R32/sysroot
-	export QEMU_LD_PREFIX
-	case "$DRVCC" in
-	clang)	DRVCC="clang --target=riscv32-unknown-linux-gnu -march=rv32gc -mabi=ilp32d --gcc-toolchain=$R32 --sysroot=$R32/sysroot -fuse-ld=lld" ;;
-	gcc)	DRVCC="$R32/bin/riscv32-unknown-linux-gnu-gcc -fPIE -pie -std=gnu89" ;;
-	esac ;;
-cortexm3-eabi)	# no OS: newlib and semihosting on qemu's mps2-an385 board
-	RUN="qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none -semihosting-config enable=on,target=native -kernel"
-	NM=llvm-nm-18
-	case "$DRVCC" in
-	clang|gcc) DRVCC="src/cm3cc.sh $BUILDDIR $DRVCC" ;;
+if [ -n "$OESYSROOT" ]; then
+	case $TARGET in
+	armhf-linux)	Q=arm ;;
+	x86_64-linux|aarch64-linux|riscv64-linux|riscv32-linux) Q=${TARGET%-linux} ;;
+	*)	echo "$0: $TARGET is not a Yocto target" 1>&2; exit 2 ;;
 	esac
-	NOOS=1 REFCC="src/cm3cc.sh $BUILDDIR gcc" SMALL=-DSMALL_PROBLEM_SIZE ;;
-*)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
-esac
+	# the sysroot has no ld.so.cache: LD_LIBRARY_PATH keeps the target's
+	# loader from finding the host's libraries
+	RUN="qemu-$Q -L $OESYSROOT -E LD_LIBRARY_PATH=/usr/lib:/lib" NM=llvm-nm-18
+	QEMU_LD_PREFIX=$OESYSROOT
+	export QEMU_LD_PREFIX
+else
+	case $TARGET in
+	x86_64-linux)
+		RUN= NM=nm ;;
+	aarch64-linux)
+		RUN="qemu-aarch64 -L /usr/aarch64-linux-gnu" NM=llvm-nm-18
+		# an lcc built by itself for AArch64 runs with binfmt_misc
+		QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+		export QEMU_LD_PREFIX
+		case "$DRVCC" in
+		clang)	DRVCC="clang --target=aarch64-linux-gnu -fuse-ld=lld" ;;
+		gcc)	DRVCC=aarch64-linux-gnu-gcc ;;
+		esac ;;
+	riscv64-linux)
+		RUN="qemu-riscv64 -L /usr/riscv64-linux-gnu" NM=llvm-nm-18
+		QEMU_LD_PREFIX=/usr/riscv64-linux-gnu
+		export QEMU_LD_PREFIX
+		case "$DRVCC" in
+		clang)	DRVCC="clang --target=riscv64-linux-gnu -fuse-ld=lld" ;;
+		gcc)	DRVCC=riscv64-linux-gnu-gcc ;;
+		esac ;;
+	armhf-linux)
+		RUN="qemu-arm -L /usr/arm-linux-gnueabihf" NM=llvm-nm-18
+		QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
+		export QEMU_LD_PREFIX
+		# lcc's off_t has 64 bits and time_t 32 (see README); clang's off_t
+		# has 32 by default, Ubuntu's gcc's time_t 64 (-U_TIME_BITS also
+		# removes _FILE_OFFSET_BITS)
+		case "$DRVCC" in
+		clang)	DRVCC="clang --target=arm-linux-gnueabihf -D_FILE_OFFSET_BITS=64 -fuse-ld=lld" ;;
+		gcc)	DRVCC="arm-linux-gnueabihf-gcc -U_TIME_BITS -D_FILE_OFFSET_BITS=64" ;;
+		esac ;;
+	riscv32-linux)	# BUILDDIR/riscv32 is the toolchain, see etc/llvm-riscv32-linux.c
+		R32=`cd $BUILDDIR/riscv32 && pwd`
+		RUN="qemu-riscv32 -L $R32/sysroot" NM=llvm-nm-18
+		QEMU_LD_PREFIX=$R32/sysroot
+		export QEMU_LD_PREFIX
+		case "$DRVCC" in
+		clang)	DRVCC="clang --target=riscv32-unknown-linux-gnu -march=rv32gc -mabi=ilp32d --gcc-toolchain=$R32 --sysroot=$R32/sysroot -fuse-ld=lld" ;;
+		gcc)	DRVCC="$R32/bin/riscv32-unknown-linux-gnu-gcc -fPIE -pie -std=gnu89" ;;
+		esac ;;
+	cortexm3-eabi)	# no OS: newlib and semihosting on qemu's mps2-an385 board
+		RUN="qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none -semihosting-config enable=on,target=native -kernel"
+		NM=llvm-nm-18
+		case "$DRVCC" in
+		clang|gcc) DRVCC="src/cm3cc.sh $BUILDDIR $DRVCC" ;;
+		esac
+		NOOS=1 REFCC="src/cm3cc.sh $BUILDDIR gcc" SMALL=-DSMALL_PROBLEM_SIZE ;;
+	*)	echo "$0: unknown target $TARGET" 1>&2; exit 2 ;;
+	esac
+fi
 command -v $NM >/dev/null || NM=/usr/lib/llvm-18/bin/llvm-nm
 OPT=${OPT-opt}
 MLIRBIN=${MLIRBIN-/usr/lib/llvm-21/bin}
