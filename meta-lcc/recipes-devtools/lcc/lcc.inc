@@ -9,7 +9,7 @@ NO_GENERIC_LICENSE[lcc] = "CPYRIGHT"
 LIC_FILES_CHKSUM = "file://CPYRIGHT;md5=39e00b4ccb5ceedf0afbbec04b63c7bc"
 
 SRC_URI = "git://github.com/compilers-kiwon/lcc_llvm.git;protocol=https;branch=master"
-SRCREV = "c2a5cedc2eb424f438b217f6701847643afb529a"
+SRCREV = "73c248d1848543bd73c10e11fe62bde6b3adc05a"
 PV = "4.2+git"
 
 # lcc's makefile runs in the source tree, with paths relative to it, and
