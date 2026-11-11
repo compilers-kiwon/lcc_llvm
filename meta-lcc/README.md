@@ -93,11 +93,12 @@ LLVM 23.1.3 and GCC 16.2, and checked with
 | `qemuarm` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
 | `qemuriscv32` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
 
-Two things only the Yocto build found:
+Three things only the Yocto build found:
 
 | Symptom | Cause |
 | :- | :- |
 | rcc crashes at the first function | Yocto builds it with `-O2`, lcc's makefile with `-g`; lcc's allocator aligned for `double`, not for the `long double` in its symbols |
+| make runs `yacc lburg/gram.y` and fails | a git checkout can leave `gram.y` newer than `gram.c`; the recipes run make with `-r`, without its built-in rules |
 | `qemuarm` programs ask for `/usr/lib/ld-linux.so.3` | Yocto's gcc gets `-mfloat-abi=hard` from `${CC}`, not by default; the driver passes it when it links for `armhf-linux` |
 
 ## Use

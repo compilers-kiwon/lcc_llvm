@@ -13,9 +13,11 @@ SRCREV = "14683712ca850c825bc6cc0785acf27eb5def870"
 PV = "4.2+git"
 
 # lcc's makefile runs in the source tree, with paths relative to it, and
-# builds wherever BUILDDIR says.
+# builds wherever BUILDDIR says. It spells out every rule; -r drops make's
+# built-in ones, of which .y.c would remake lburg/gram.c with yacc when the
+# checkout leaves gram.y the newer file.
 B = "${WORKDIR}/build"
-EXTRA_OEMAKE = "-C ${S} BUILDDIR=${B}"
+EXTRA_OEMAKE = "-r -C ${S} BUILDDIR=${B}"
 
 # The target as lcc names it (rcc -target=llvm/LCCTARGET, etc/llvm-LCCTARGET.c
 # and include/llvm/LCCTARGET): one of lcc's Linux targets, or none.
