@@ -183,8 +183,10 @@ LCCFLAGS=-Wa-O2 DRVCC=gcc src/run-llvm.sh -b $B unit     # 최적화한 lcc 코�
 ## Yocto
 
 [meta-lcc](meta-lcc/README.md)는 lcc를 OpenEmbedded 빌드의 교차 툴체인에 `TARGET_PREFIX-lcc`로 넣는
-레이어다. 레시피가 gcc처럼 lcc로 타깃 프로그램을 컴파일할 수 있다. 리눅스 타깃 다섯을 지원하며,
-qemux86-64, qemuarm64, qemuriscv64, qemuarm, qemuriscv32에서 위 시험 묶음이 모두 통과한다.
+레이어다. 레시피가 gcc처럼 lcc로 타깃 프로그램을 컴파일할 수 있다. MLIR 백엔드를 켜면
+`TARGET_PREFIX-lcc-mlir`도 생긴다. 오브젝트는 Yocto의 `llc`(MLIR은 `mlir-opt`, `mlir-translate`를 거쳐)가
+만들고 링크는 툴체인의 gcc가 한다. 리눅스 타깃 다섯을 지원하며, qemux86-64, qemuarm64, qemuriscv64,
+qemuarm, qemuriscv32에서 두 드라이버 모두 위 시험 묶음이 전부 통과한다.
 
 ## armhf의 off_t와 time_t
 
