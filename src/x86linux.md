@@ -777,6 +777,20 @@ static void progend(void) {
         print(".ident \"LCC: 4.2\"\n");
 }
 
+/* ecxtarget - target p's kid n to %ecx, through a copy if that kid's own
+   shift count is in %ecx already, as in x / (1 << n) and x << (1 << n) */
+static void ecxtarget(Node p, int n) {
+        Node q = p->kids[n];
+
+        if (q->kids[1] && q->kids[1]->syms[RX] == intreg[ECX]) {
+                q = newnode(LOAD + opkind(q->op), q, NULL, q->syms[0]);
+                p->kids[n] = p->x.kids[n] = q;
+                q->x.kids[0] = q->kids[0];
+                setreg(q, intreg[ECX]);
+        } else
+                rtarget(p, n, intreg[ECX]);
+}
+
 static void target(Node p) {
         assert(p);
         switch (specific(p->op)) {
@@ -786,7 +800,7 @@ static void target(Node p) {
                      && specific(p->kids[1]->kids[0]->op) == VREG+P
                      && p->kids[1]->syms[RX]->u.t.cse
                      && generic(p->kids[1]->syms[RX]->u.t.cse->op) == CNST)) {
-                        rtarget(p, 1, intreg[ECX]);
+                        ecxtarget(p, 1);
                 }
                 break;
         case MUL+U:
@@ -796,12 +810,12 @@ static void target(Node p) {
         case DIV+I: case DIV+U:
                 setreg(p, quo);
                 rtarget(p, 0, intreg[EAX]);
-                rtarget(p, 1, intreg[ECX]);
+                ecxtarget(p, 1);
                 break;
         case MOD+I: case MOD+U:
                 setreg(p, rem);
                 rtarget(p, 0, intreg[EAX]);
-                rtarget(p, 1, intreg[ECX]);
+                ecxtarget(p, 1);
                 break;
         case ASGN+B:
                 rtarget(p, 0, intreg[EDI]);
