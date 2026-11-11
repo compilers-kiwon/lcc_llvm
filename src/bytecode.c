@@ -42,10 +42,13 @@ static void I(defconst)(int suffix, int size, Value v) {
 	case F:
 		if (size == 4) {
 			float f = v.d;
-			print("byte 4 %u\n", *(unsigned *)&f);
+			unsigned w;
+			memcpy(&w, &f, sizeof w);
+			print("byte 4 %u\n", w);
 		} else {
 			double d = v.d;
-			unsigned *p = (unsigned *)&d;
+			unsigned p[2];
+			memcpy(p, &d, sizeof p);
 			print("byte 4 %u\n", p[swap]);
 			print("byte 4 %u\n", p[1 - swap]);
 		}

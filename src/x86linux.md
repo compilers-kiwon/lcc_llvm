@@ -974,10 +974,13 @@ static void defconst(int suffix, int size, Value v) {
                 print(".long %d\n", (int)(long)v.p);
         else if (suffix == F && size == 4) {
                 float f = v.d;
-                print(".long %d\n", (int)(*(unsigned *)&f));
+                unsigned w;
+                memcpy(&w, &f, sizeof w);
+                print(".long %d\n", (int)w);
         } else if (suffix == F && size == 8) {
                 double d = v.d;
-                unsigned *p = (unsigned *)&d;
+                unsigned p[2];
+                memcpy(p, &d, sizeof p);
                 print(".long %d\n.long %d\n", (int)p[swap], (int)p[!swap]);
         }
         else assert(0);

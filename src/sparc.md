@@ -891,10 +891,13 @@ static void renameregs(void) {
 static void defconst(int suffix, int size, Value v) {
         if (suffix == F && size == 4) {
                 float f = v.d;
-                print(".word 0x%x\n", *(unsigned *)&f);
+                unsigned w;
+                memcpy(&w, &f, sizeof w);
+                print(".word 0x%x\n", w);
         } else if (suffix == F && size == 8) {
                 double d = v.d;
-                unsigned *p = (unsigned *)&d;
+                unsigned p[2];
+                memcpy(p, &d, sizeof p);
                 print(".word 0x%x\n.word 0x%x\n", p[swap], p[!swap]);
         } else if (suffix == P)
                 print(".word 0x%x\n", (unsigned)(unsigned long)v.p);
