@@ -8,6 +8,7 @@ union align {
 	long l;
 	char *p;
 	double d;
+	long double ld;	/* in Value, which symbols and trees hold */
 	int (*f)(void);
 };
 union header {
