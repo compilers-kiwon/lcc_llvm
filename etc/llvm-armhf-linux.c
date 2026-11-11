@@ -36,6 +36,11 @@ char *cpp[] = { LCCDIR "cpp",
 char *include[] = { "-I" LCCDIR "include", "-I" SYSROOT "/include", 0 };
 char *com[] = { LCCDIR "rcc", "-target=llvm/armhf-linux",
 	"-wchar_t=unsigned_int", "$1", "$2", "$3", 0 };
+/* what clang gives llc by default for this target, for the Yocto
+   toolchain of etc/oe-linux.c */
+#define LLCFLAGS "-mcpu=generic", "-mattr=+vfp3d16,-neon", "-float-abi=hard"
+/* and what gcc needs to link for it: the hard-float loader and libraries */
+#define OELDFLAGS "-mfloat-abi=hard"
 char *as[] = { CLANG, "--target=arm-linux-gnueabihf", "-c", "-o", "$3", "$1", "$2", 0 };
 char *ld[] = {
 	/*  0 */ CLANG, "", "-o", "$3", "$1", "$2",

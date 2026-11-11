@@ -28,6 +28,9 @@ char *cpp[] = { LCCDIR "cpp",
 char *include[] = { "-I" LCCDIR "include", "-I" SYSROOT "/include", 0 };
 char *com[] = { LCCDIR "rcc", "-target=llvm/aarch64-linux",
 	"-wchar_t=unsigned_int", "$1", "$2", "$3", 0 };
+/* what clang gives llc by default for this target, for the Yocto
+   toolchain of etc/oe-linux.c */
+#define LLCFLAGS "-mcpu=generic", "-mattr=+v8a,+fp-armv8,+neon"
 char *as[] = { CLANG, "--target=aarch64-linux-gnu", "-c", "-o", "$3", "$1", "$2", 0 };
 char *ld[] = {
 	/*  0 */ CLANG, "", "-o", "$3", "$1", "$2",

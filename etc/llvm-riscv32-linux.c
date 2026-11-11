@@ -29,6 +29,10 @@ char *include[] = { "-I" LCCDIR "include",
 char *com[] = { LCCDIR "rcc", "-target=llvm/riscv32-linux",
 	"-wchar_t=unsigned_int", "$1", "$2", "$3", 0 };
 #define TARGET "--target=riscv32-unknown-linux-gnu", "-march=rv32gc", "-mabi=ilp32d"
+/* what clang gives llc by default for this target, for the Yocto
+   toolchain of etc/oe-linux.c */
+#define LLCFLAGS "-mcpu=generic-rv32", \
+	"-mattr=+m,+a,+f,+d,+c,+zicsr,+zifencei,+relax", "-target-abi=ilp32d"
 char *as[] = { CLANG, TARGET, "-c", "-o", "$3", "$1", "$2", 0 };
 char *ld[] = {
 	/*  0 */ CLANG, "", "-o", "$3", "$1", "$2",
