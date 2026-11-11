@@ -86,8 +86,8 @@ typedef	struct	includelist {
 } Includelist;
 
 #define	new(t)	(t *)domalloc(sizeof(t))
-#define	quicklook(a,b)	(namebit[(a)&077] & (1<<((b)&037)))
-#define	quickset(a,b)	namebit[(a)&077] |= (1<<((b)&037))
+#define	quicklook(a,b)	((namebit[(a)&077] & (1UL<<((b)&037))) != 0)
+#define	quickset(a,b)	namebit[(a)&077] |= (1UL<<((b)&037))
 extern	unsigned long namebit[077+1];
 
 enum errtype { WARNING, ERROR, FATAL };

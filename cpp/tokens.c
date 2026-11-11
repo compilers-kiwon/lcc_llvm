@@ -183,7 +183,8 @@ movetokenrow(Tokenrow *dtr, Tokenrow *str)
 
 	/* nby = sizeof(Token) * (str->lp - str->bp); */
 	nby = (char *)str->lp - (char *)str->bp;
-	memmove(dtr->tp, str->bp, nby);
+	if (nby > 0)
+		memmove(dtr->tp, str->bp, nby);
 }
 
 /*
