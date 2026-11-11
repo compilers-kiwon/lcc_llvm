@@ -1,6 +1,5 @@
 #include "c.h"
 #include <float.h>
-#include <errno.h>
 
 static char rcsid[] = "$Id$";
 
@@ -154,6 +153,7 @@ static void *wcput(int c, void *cl);
 static void *scon(int q, void *put(int c, void *cl), void *cl);
 static int backslash(int q);
 static Symbol fcon(void);
+static int nonzero(char *, char *);
 static Symbol icon(unsigned long, int, int);
 static void ppnumber(char *);
 
@@ -763,6 +763,8 @@ static void ppnumber(char *which) {
 			(char*)cp-token, which);
 }
 static Symbol fcon(void) {
+	int over, zero;
+
 	if (*cp == '.')
 		do
 			cp++;
@@ -779,39 +781,48 @@ static Symbol fcon(void) {
 				(char*)cp - token);
 	}
 
-	errno = 0;
-	if ((*cp == 'l' || *cp == 'L') && IR->quadld) {
+	/* as gcc and clang: one warning if the value is too large for its
+	   type, and one if a nonzero value is too small and becomes 0; none
+	   for subnormal values */
+	if (*cp == 'f' || *cp == 'F')
+		tval.type = floattype;
+	else if (*cp == 'l' || *cp == 'L')
+		tval.type = longdouble;
+	else
+		tval.type = doubletype;
+	if (tval.type == longdouble && IR->quadld) {
 		tval.u.c.v.q = q_fromstr(token);	/* exact, unlike the host's */
-		if (q_isinf(tval.u.c.v.q))
-			warning("overflow in floating constant `%S'\n", token,
-				(char*)cp - token);
-	} else if ((*cp == 'l' || *cp == 'L') && longdouble->size > doubletype->size)
-		tval.u.c.v.d = strtold(token, NULL);	/* more digits than a double */
-	else if ((*cp == 'f' || *cp == 'F') && floattype->size < doubletype->size) {
-		tval.u.c.v.d = strtof(token, NULL);	/* a float's value, rounded once */
-		errno = 0;	/* overflow is checked below, as before */
-	} else
-		tval.u.c.v.d = strtod(token, NULL);
-	if (errno == ERANGE)
+		over = q_isinf(tval.u.c.v.q);
+		zero = q_iszero(tval.u.c.v.q);
+	} else {
+		if (tval.type == longdouble && longdouble->size > doubletype->size)
+			tval.u.c.v.d = strtold(token, NULL);	/* more digits than a double */
+		else if (tval.type == floattype && floattype->size < doubletype->size)
+			tval.u.c.v.d = strtof(token, NULL);	/* a float's value, rounded once */
+		else
+			tval.u.c.v.d = strtod(token, NULL);
+		over = tval.u.c.v.d > tval.type->u.sym->u.limits.max.d;
+		zero = tval.u.c.v.d == 0;
+	}
+	if (tval.type != doubletype)
+		cp++;
+	if (over)
 		warning("overflow in floating constant `%S'\n", token,
 			(char*)cp - token);
-	if (*cp == 'f' || *cp == 'F') {
-		++cp;
-		if (tval.u.c.v.d > floattype->u.sym->u.limits.max.d)
-			warning("overflow in floating constant `%S'\n", token,
-				(char*)cp - token);
-		tval.type = floattype;
-	} else if (*cp == 'l' || *cp == 'L') {
-		cp++;
-		tval.type = longdouble;
-	} else {
-		if (tval.u.c.v.d > doubletype->u.sym->u.limits.max.d)
-			warning("overflow in floating constant `%S'\n", token,
-				(char*)cp - token);
-		tval.type = doubletype;
-	}
+	else if (zero && nonzero(token, (char *)cp))
+		warning("underflow in floating constant `%S'\n", token,
+			(char*)cp - token);
 	ppnumber("floating");
 	return &tval;
+}
+
+/* nonzero - whether the digits of the floating constant s..end before its
+   exponent are not all 0 */
+static int nonzero(char *s, char *end) {
+	for ( ; s < end && *s != 'e' && *s != 'E'; s++)
+		if (*s >= '1' && *s <= '9')
+			return 1;
+	return 0;
 }
 
 static void *cput(int c, void *cl) {
