@@ -37,6 +37,9 @@ char *com[] = { LCCDIR "rcc", "-target=mlir/aarch64-linux",
    has no newline (callsys splits commands there) and its first '$' is not
    followed by a digit (compose substitutes only the first $n of an
    element). */
+/* what clang gives llc by default for this target, for the Yocto
+   toolchain of etc/oe-linux.c */
+#define LLCFLAGS "-mcpu=generic", "-mattr=+v8a,+fp-armv8,+neon"
 char *as[] = { "/bin/sh", "-c",
 	"t=`mktemp -d` || exit 1; trap 'rm -rf \"$t\"' 0; trap 'exit 1' 1 2 15; "
 	"b=$1 o=$2 i=$3; shift 3; "
