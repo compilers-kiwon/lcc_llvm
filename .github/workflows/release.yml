@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (must already exist)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # One archive per target and back end: lcc as a cross compiler on an
+  # x86-64 Linux host, checked with lcc's own tests before it is packed.
+  package:
+    name: ${{ matrix.backend }}/${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        target: [x86_64-linux, aarch64-linux, riscv64-linux, armhf-linux, riscv32-linux, cortexm3-eabi]
+        backend: [llvm, mlir]
+    env:
+      T: ${{ matrix.target }}
+      BE: ${{ matrix.backend }}
+      B: ${{ github.workspace }}/../build
+      RISCV32: /home/runner/riscv32
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install the tools
+        run: .github/scripts/ci-target.sh deps "$T" "$BE"
+
+      # built by CI's riscv32-toolchain job
+      - name: Restore the riscv32 toolchain
+        if: matrix.target == 'riscv32-linux'
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/riscv32
+          key: riscv32-toolchain-${{ hashFiles('.github/scripts/riscv32-toolchain.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Build
+        run: .github/scripts/ci-target.sh build "$T" "$BE" "$B"
+
+      - name: Test
+        run: |
+          src/run-llvm.sh -q -t "$T" -b "$B" lcc
+          src/run-llvm.sh -q -t "$T" -b "$B" unit
+
+      - name: Package
+        run: |
+          set -eu
+          N=lcc-$TAG-$BE-$T
+          mkdir -p "dist/$N"
+          cp "$B/lcc" "$B/rcc" "$B/cpp" "$B/liblcc.a" "dist/$N/"
+          cp -R "$B/include" "dist/$N/"
+          if [ "$T" = cortexm3-eabi ]; then
+            cp "$B/cortexm3.ld" "$B/vectors.o" "dist/$N/"
+          fi
+          strip "dist/$N/lcc" "dist/$N/rcc" "dist/$N/cpp"
+          cp README.md CPYRIGHT "dist/$N/"
+          tar -czf "dist/$N.tar.gz" -C dist "$N"
+          ( cd dist && sha256sum "$N.tar.gz" > "$N.tar.gz.sha256" )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcc-${{ matrix.backend }}-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          cat > notes.md <<'NOTES'
+          LLVM IR과 MLIR을 내는 백엔드를 단 lcc 4.2.
+
+          `lcc-TAG-BACKEND-TARGET.tar.gz`는 타깃 하나와 백엔드 하나의 lcc다. x86-64
+          리눅스에서 도는 컴파일러(Ubuntu 24.04에서 빌드)로, 드라이버 `lcc`, `rcc`, `cpp`,
+          `include/`의 타깃 헤더, lcc가 모든 프로그램에 링크하는 `liblcc.a`가 들어 있다
+          (cortexm3-eabi는 `cortexm3.ld`와 `vectors.o`도).
+
+          ### 사용
+
+          ```
+          tar -xzf lcc-TAG-llvm-x86_64-linux.tar.gz
+          LCCDIR=$PWD/lcc-TAG-llvm-x86_64-linux lcc-TAG-llvm-x86_64-linux/lcc -o hello hello.c
+          ```
+
+          `LCCDIR`이나 `lcc -Wo-lccdir=DIR`로 드라이버에 압축을 푼 곳을 알려 준다.
+          `/usr/local/lib/lcc/`로 복사하고 `lcc`를 PATH에 두면 둘 다 필요 없다. llvm
+          드라이버는 `/usr/bin/clang`(clang 18)으로, mlir 드라이버는 `/usr/lib/llvm-21/bin`의
+          LLVM 21로 오브젝트를 만든다. 교차 타깃에는 README.md에 적은 C 라이브러리가
+          필요하고, riscv32-linux는 툴체인을 `LCCDIR/riscv32`에서 찾는다. 라이선스는
+          CPYRIGHT다.
+          NOTES
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md dist/*
