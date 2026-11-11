@@ -189,6 +189,7 @@ GitHub Actions가 `master`에 push하거나 PR을 열 때마다 [ci.yml](.github
 | 작업 | 하는 일 |
 | :- | :- |
 | `llvm/T`, `mlir/T` | 여섯 타깃 × 두 백엔드로 빌드하고 위 시험 묶음 전부, unit의 변형 셋(gcc 드라이버, 최적화한 드라이버, `-Wa-O2`), selfhost(Cortex-M3 빼고) |
+| ASan + UBSan | lcc 자체(cpp, rcc, 드라이버)를 ASan·UBSan으로 빌드해 x86_64의 두 백엔드로 위 시험 묶음을 돌린다. 첫 보고에서 멈춘다 |
 | x86_64 extras | 원래 x86/linux 백엔드(`run-x86.sh`), 두 백엔드 비교(`cmp-backends.sh`), `mlir-lint.sh -t` |
 | riscv32 toolchain | Ubuntu에 없는 riscv32 툴체인을 빌드해 캐시에 둔다(처음 한 번 한 시간쯤) |
 | Yocto layer | meta-lcc를 openembedded-core로 파싱하고 레시피가 무엇으로 풀리는지 확인 |

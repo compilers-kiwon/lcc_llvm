@@ -97,6 +97,60 @@ jobs:
         if: (success() || failure()) && matrix.target != 'cortexm3-eabi'
         run: src/selfhost.sh -t "$BE" -x "$T" -b "$B"
 
+  # lcc itself (cpp, rcc, the driver) built with ASan and UBSan, stopping at
+  # the first report, through the suites on x86-64 with both back ends.
+  sanitizers:
+    name: ASan + UBSan, ${{ matrix.backend }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [llvm, mlir]
+    env:
+      BE: ${{ matrix.backend }}
+      B: ${{ github.workspace }}/../build
+      SUITES: ${{ github.workspace }}/../suites
+      ASAN_OPTIONS: detect_leaks=0
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the tools
+        run: .github/scripts/ci-target.sh deps x86_64-linux "$BE"
+
+      - name: Cache the external suites
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../suites
+          key: suites-${{ hashFiles('.github/scripts/fetch-suites.sh') }}
+
+      - name: Fetch the external suites
+        run: .github/scripts/fetch-suites.sh "$SUITES"
+
+      - name: Build with the sanitizers
+        run: SANITIZE=address,undefined .github/scripts/ci-target.sh build x86_64-linux "$BE" "$B"
+
+      - name: lcc
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" lcc
+
+      - name: unit
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" unit
+
+      - name: c-testsuite
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" c-testsuite "$SUITES/c-testsuite"
+
+      - name: torture
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" torture "$SUITES/llvm-test-suite/SingleSource/Regression/C/gcc-c-torture/execute"
+
+      - name: llvm-bench
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" llvm-bench "$SUITES/llvm-test-suite"
+
   # x86-64 only: the original x86/linux back end, the two back ends against
   # each other, and the MLIR lint's own tests.
   host:

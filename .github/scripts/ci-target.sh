@@ -9,7 +9,8 @@
 #   build  build lcc in builddir with etc/BACKEND-TARGET.c: cpp, rcc, the
 #          driver, the target's headers and liblcc, built by the target's
 #          gcc, and the board files for cortexm3-eabi; riscv32-linux takes
-#          its toolchain from $RISCV32 (.github/scripts/riscv32-toolchain.sh)
+#          its toolchain from $RISCV32 (.github/scripts/riscv32-toolchain.sh);
+#          $SANITIZE builds lcc itself with -fsanitize=$SANITIZE
 #
 # target is x86_64-linux, aarch64-linux, riscv64-linux, armhf-linux,
 # riscv32-linux or cortexm3-eabi, backend llvm or mlir.
@@ -42,17 +43,28 @@ build)
 	[ -n "$B" ] || { echo "usage: $0 build target backend builddir" 1>&2; exit 2; }
 	mkdir -p "$B"
 	H=etc/$BE-$T.c
+	if [ -n "$SANITIZE" ]; then
+		set -- "CFLAGS=-g -O1 -fno-omit-frame-pointer -fsanitize=$SANITIZE" \
+			"LDFLAGS=-fsanitize=$SANITIZE"
+	else
+		set --
+	fi
 	case $T in
 	x86_64-linux)
-		make BUILDDIR=$B HOSTFILE=$H all headers ;;
+		if [ -n "$SANITIZE" ]; then	# not liblcc, which programs link
+			make BUILDDIR=$B HOSTFILE=$H "$@" rcc lcc cpp headers
+			make BUILDDIR=$B liblcc
+		else
+			make BUILDDIR=$B HOSTFILE=$H all headers
+		fi ;;
 	riscv32-linux)
 		[ -x "$RISCV32/bin/riscv32-unknown-linux-gnu-gcc" ] ||
 			{ echo "$0: no riscv32 toolchain in \$RISCV32" 1>&2; exit 1; }
 		ln -sfn "$RISCV32" $B/riscv32
-		make BUILDDIR=$B HOSTFILE=$H rcc lcc cpp headers
+		make BUILDDIR=$B HOSTFILE=$H "$@" rcc lcc cpp headers
 		make BUILDDIR=$B CC="$B/riscv32/bin/riscv32-unknown-linux-gnu-gcc -fPIE" liblcc ;;
 	cortexm3-eabi)
-		make BUILDDIR=$B HOSTFILE=$H rcc lcc cpp headers board
+		make BUILDDIR=$B HOSTFILE=$H "$@" rcc lcc cpp headers board
 		make BUILDDIR=$B CC="arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -fno-short-enums" liblcc ;;
 	*)
 		case $T in
@@ -60,7 +72,7 @@ build)
 		riscv64-linux)	cc=riscv64-linux-gnu-gcc ;;
 		armhf-linux)	cc=arm-linux-gnueabihf-gcc ;;
 		esac
-		make BUILDDIR=$B HOSTFILE=$H rcc lcc cpp headers
+		make BUILDDIR=$B HOSTFILE=$H "$@" rcc lcc cpp headers
 		make BUILDDIR=$B CC=$cc liblcc ;;
 	esac ;;
 *)
