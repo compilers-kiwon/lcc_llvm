@@ -1,5 +1,7 @@
 # lcc_llvm — LLVM·MLIR 백엔드를 단 lcc 4.2
 
+[![CI](https://github.com/compilers-kiwon/lcc_llvm/actions/workflows/ci.yml/badge.svg)](https://github.com/compilers-kiwon/lcc_llvm/actions/workflows/ci.yml)
+
 lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C89("ANSI C") 컴파일러다.
 이 저장소는 [lcc 4.2](https://github.com/drh/lcc)에 백엔드 둘을 더했다. 하나는 **LLVM IR**을,
 하나는 **MLIR**을 내며, 리눅스 다섯과 OS 없는 Cortex-M3까지 타깃은 여섯이다. 언어는 그대로 C89다.
@@ -179,6 +181,23 @@ LCCFLAGS=-Wa-O2 DRVCC=gcc src/run-llvm.sh -b $B unit     # 최적화한 lcc 코�
 | `src/mlir-lint.sh` | mlir 백엔드 출력이 방언 규칙을 지키는지 검사 |
 | `src/run-x86.sh` | `tst/*.c`를 원래의 x86/linux 백엔드로 실행 |
 | `meta-lcc/scripts/check-tests.sh` | Yocto 머신마다 툴체인의 lcc로 위 묶음을 실행 |
+
+## CI/CD
+
+GitHub Actions가 `master`에 push하거나 PR을 열 때마다 [ci.yml](.github/workflows/ci.yml)을 돌린다.
+
+| 작업 | 하는 일 |
+| :- | :- |
+| `llvm/T`, `mlir/T` | 여섯 타깃 × 두 백엔드로 빌드하고 위 시험 묶음 전부, unit의 변형 셋(gcc 드라이버, 최적화한 드라이버, `-Wa-O2`), selfhost(Cortex-M3 빼고) |
+| x86_64 extras | 원래 x86/linux 백엔드(`run-x86.sh`), 두 백엔드 비교(`cmp-backends.sh`), `mlir-lint.sh -t` |
+| riscv32 toolchain | Ubuntu에 없는 riscv32 툴체인을 빌드해 캐시에 둔다(처음 한 번 한 시간쯤) |
+| Yocto layer | meta-lcc를 openembedded-core로 파싱하고 레시피가 무엇으로 풀리는지 확인 |
+
+외부 시험 묶음은 정해 둔 커밋으로 CI에서 받는다([fetch-suites.sh](.github/scripts/fetch-suites.sh)).
+타깃 하나의 설치·빌드는 [ci-target.sh](.github/scripts/ci-target.sh)가 하므로 로컬에서도 같은 명령으로 재현할 수 있다.
+
+`v`로 시작하는 태그를 push하면 [release.yml](.github/workflows/release.yml)이 타깃·백엔드마다 lcc를 빌드하고
+시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다.
 
 ## Yocto
 
