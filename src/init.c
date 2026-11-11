@@ -136,7 +136,7 @@ static int initfields(Field p, Field q, int skip) {
 				warning("initializer exceeds bit-field width\n");
 			i &= fieldmask(p);
 		}
-		bits |= i<<fieldright(p);
+		bits |= (unsigned)i<<fieldright(p);
 		if (IR->little_endian) {
 			if (fieldsize(p) + fieldright(p) > n)
 				n = fieldsize(p) + fieldright(p);

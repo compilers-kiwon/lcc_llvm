@@ -774,13 +774,13 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
                         i + sizeisave - 4);
         saved = maxargoffset;
         for (i = 20; i <= 30; i += 2)
-                if (usedmask[FREG]&(3<<i)) {
+                if (usedmask[FREG]&(3U<<i)) {
                         print("s.d $f%d,%d($sp)\n", i, saved);
                         saved += 8;
                 }
 
         for (i = 16; i <= 31; i++)
-                if (usedmask[IREG]&(1<<i)) {
+                if (usedmask[IREG]&(1U<<i)) {
                         if (i == 25)
                                 print(".cprestore %d\n", saved);
                         else
@@ -833,12 +833,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
         emitcode();
         saved = maxargoffset;
         for (i = 20; i <= 30; i += 2)
-                if (usedmask[FREG]&(3<<i)) {
+                if (usedmask[FREG]&(3U<<i)) {
                         print("l.d $f%d,%d($sp)\n", i, saved);
                         saved += 8;
                 }
         for (i = 16; i <= 31; i++)
-                if (usedmask[IREG]&(1<<i)) {
+                if (usedmask[IREG]&(1U<<i)) {
                         print("lw $%d,%d($sp)\n", i, saved);
                         saved += 4;
                 }

@@ -17,7 +17,7 @@ static char *outd(long n, FILE *f, char *bp) {
 
 	*--s = '\0';
 	if (n < 0)
-		m = -n;
+		m = -(unsigned long)n;
 	else
 		m = n;
 	do
