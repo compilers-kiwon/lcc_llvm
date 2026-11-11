@@ -336,6 +336,28 @@ static Tree postfix(Tree p) {
 			return p;
 		}
 }
+/* funcarray - the array __func__ of the current function: as in C99
+   6.4.2.2, which gcc and clang follow in C89 too, static const char
+   __func__[] = "name" declared at the start of its body.  Outside a
+   function, as with them, an empty string and a warning.  Like a string
+   literal, it is emitted at the end (doconst), not inside a definition
+   being initialized; its type, an array of const char, keeps it apart
+   from string literals */
+static Symbol funcarray(void) {
+	Value v;
+	Symbol p;
+
+	if (cfunc && level > PARAM)
+		v.p = cfunc->name;
+	else {
+		warning("`__func__' is not defined outside of a function\n");
+		v.p = string("");
+	}
+	p = constant(array(qual(CONST, chartype), strlen(v.p) + 1, 0), v);
+	if (p->u.c.loc == NULL)
+		p->u.c.loc = genident(STATIC, p->type, GLOBAL);
+	return p->u.c.loc;
+}
 static Tree primary(void) {
 	Tree p;
 
@@ -354,7 +376,11 @@ static Tree primary(void) {
 		   if (tsym->u.c.loc == NULL)
 		   	tsym->u.c.loc = genident(STATIC, tsym->type, GLOBAL);
 		   p = idtree(tsym->u.c.loc); break;
-	case ID:   if (tsym == NULL)
+	case ID:   if (tsym == NULL && strcmp(token, "__func__") == 0) {
+		   	p = idtree(funcarray());
+		   	break;
+		   }
+		   if (tsym == NULL)
 		   	{
 				Symbol p = install(token, &identifiers, level, PERM);
 				p->src = src;
