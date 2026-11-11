@@ -19,7 +19,8 @@
 #                     tst/llvm/NAME-drv.c compiled by clang ($DRVCC); the driver
 #                     checks the results and must exit with 0, and each data
 #                     object of NAME.o must have the size of the object
-#                     r_NAME that the driver defines, if there is one
+#                     r_NAME that the driver defines, if there is one; lcc's
+#                     messages are compared with tst/llvm/NAME.2bk if there
 #   c-testsuite DIR   DIR/tests/single-exec/*.c tagged c89; stdout+stderr
 #                     compared with NAME.c.expected, exit status must be 0
 #   torture DIR       DIR/*.c and DIR/ieee/*.c of gcc.c-torture/execute;
@@ -385,6 +386,10 @@ unit)
 		n=`basename $src .c`; selected $n || continue
 		if ! timeout 300 $LCC -c -o $T/$n.o $src >$T/$n.cerr 2>&1; then
 			report CFAIL $n "`grep -v -e 'Unknown preprocessor control' -e ': warning: ' $T/$n.cerr | head -1`"
+			continue
+		fi
+		if [ $ownlcc = 1 -a -r tst/llvm/$n.2bk ] && ! cmp -s tst/llvm/$n.2bk $T/$n.cerr; then
+			report FAIL $n "messages differ from tst/llvm/$n.2bk"
 			continue
 		fi
 		verify $n $src || continue
