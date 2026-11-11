@@ -7,11 +7,15 @@
 # lcc-runtime, the cross toolchain and the target sysroot, runs lcc-hello
 # under user-mode qemu, then hands that toolchain to src/run-llvm.sh
 # (OESYSROOT) for its suites lcc and unit; the unit tests' drivers are
-# compiled by the toolchain's gcc.  $SUITES picks other suites, e.g.
+# compiled by the toolchain's gcc.  It checks each driver the toolchain
+# has: TARGET_PREFIX-lcc and, with LCC_BACKENDS = "llvm mlir",
+# TARGET_PREFIX-lcc-mlir, whose MLIR run-llvm.sh lowers and verifies with
+# mlir-native's tools.  $SUITES picks other suites, e.g.
 # SUITES="lcc unit c-testsuite torture llvm-bench" with the directories
 # of the external ones in $C_TESTSUITE, $TORTURE and $LLVM_TESTSUITE.
-# The results go to $OUT (default tmp/lcc-tests) as MACHINE/SUITE;
-# the exit status is 0 only if every suite passes on every machine.
+# The results go to $OUT (default tmp/lcc-tests) as MACHINE/SUITE for
+# lcc and MACHINE/mlir-SUITE for lcc-mlir; the exit status is 0 only if
+# every suite passes on every machine.
 #
 #   meta-lcc/scripts/check-tests.sh qemux86-64 qemuarm64 qemuriscv64 qemuarm qemuriscv32
 
@@ -42,7 +46,9 @@ for m; do
 	# the default of gcc 16, no longer has
 	cc="`var CC $env` -std=gnu89"
 	# the toolchain (lcc, gcc) and llvm-native's llc before the host's tools
-	path=`var STAGING_BINDIR_TOOLCHAIN $env`:`var STAGING_BINDIR_NATIVE $env`:$PATH
+	toolchain=`var STAGING_BINDIR_TOOLCHAIN $env`
+	native=`var STAGING_BINDIR_NATIVE $env`
+	path=$toolchain:$native:$PATH
 	arch=`var TARGET_ARCH $env`
 	case $arch in
 	arm)	target=armhf-linux q=arm
@@ -61,19 +67,24 @@ for m; do
 		fails=`expr $fails + 1`
 	fi
 
-	for s in $SUITES; do
-		case $s in
-		c-testsuite) dir=$C_TESTSUITE ;;
-		torture) dir=$TORTURE ;;
-		llvm-bench) dir=$LLVM_TESTSUITE ;;
-		*) dir= ;;
-		esac
-		PATH=$path OESYSROOT=$sysroot LCC="${prefix}lcc --sysroot=$sysroot" \
-			DRVCC="$cc" $REPO/src/run-llvm.sh -q -t $target \
-			-o $OUT/$m/$s $s $dir >$OUT/$m/$s.log 2>&1
-		status=$?
-		tail -1 $OUT/$m/$s.log
-		[ $status = 0 ] || fails=`expr $fails + 1`
+	for d in lcc lcc-mlir; do
+		[ -x $toolchain/$prefix$d ] || continue
+		case $d in lcc) pre= ;; *) pre=mlir- ;; esac
+		for s in $SUITES; do
+			case $s in
+			c-testsuite) dir=$C_TESTSUITE ;;
+			torture) dir=$TORTURE ;;
+			llvm-bench) dir=$LLVM_TESTSUITE ;;
+			*) dir= ;;
+			esac
+			PATH=$path OESYSROOT=$sysroot LCC="$prefix$d --sysroot=$sysroot" \
+				DRVCC="$cc" MLIRBIN=$native OPT=$native/opt \
+				$REPO/src/run-llvm.sh -q -t $target \
+				-o $OUT/$m/$pre$s $s $dir >$OUT/$m/$pre$s.log 2>&1
+			status=$?
+			echo "$d `tail -1 $OUT/$m/$pre$s.log`"
+			[ $status = 0 ] || fails=`expr $fails + 1`
+		done
 	done
 done
 [ $fails = 0 ]

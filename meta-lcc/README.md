@@ -1,12 +1,14 @@
 # meta-lcc
 
-LLVM 백엔드를 단 lcc를 교차 툴체인에 넣는 Yocto 레이어다. gcc-cross가
+LLVM·MLIR 백엔드를 단 lcc를 교차 툴체인에 넣는 Yocto 레이어다. gcc-cross가
 툴체인에 있는 것과 같은 방식이어서, 레시피가 `${TARGET_PREFIX}lcc`로
-타깃용 C89 프로그램을 컴파일할 수 있다.
+타깃용 C89 프로그램을 컴파일할 수 있다. MLIR 백엔드를 켜면
+`${TARGET_PREFIX}lcc-mlir`도 생긴다.
 
 | 레시피 | 실행 위치 | 용도 |
 | :- | :- | :- |
-| `lcc-cross-${TARGET_ARCH}` | 빌드 호스트 | `x86_64-oe-linux-lcc` 등: lcc 드라이버, cpp, rcc, 헤더 |
+| `lcc-cross-${TARGET_ARCH}` | 빌드 호스트 | `x86_64-oe-linux-lcc` 등: lcc 드라이버, cpp, rcc, 헤더. MLIR 백엔드를 켜면 `x86_64-oe-linux-lcc-mlir`도 |
+| `mlir-native` | 빌드 호스트 | MLIR과 `mlir-opt`, `mlir-translate`. MLIR 백엔드를 켤 때만 빌드한다 |
 | `lcc-runtime` | 타깃 | lcc가 모든 프로그램에 링크하는 `liblcc.a` |
 | `lcc-hello` | 타깃 | 예제: lcc로 C 파일 하나를 컴파일해 패키지로 만듦 |
 
@@ -19,8 +21,11 @@ LLVM 백엔드를 단 lcc를 교차 툴체인에 넣는 Yocto 레이어다. gcc-
 3. `llvm-native`의 `llc`: 위치 독립(PIC) 오브젝트를 만든다.
 4. `x86_64-oe-linux-gcc --sysroot=DIR`: `-llcc -lm`과 함께 링크한다.
 
+`x86_64-oe-linux-lcc-mlir`는 2단계에서 `rcc -target=mlir/x86_64-linux`가 MLIR을 내고,
+`mlir-native`의 `mlir-opt`와 `mlir-translate`가 그것을 LLVM IR로 내린 뒤 3단계로 간다.
+
 드라이버는 `etc/oe-linux.c`다. cpp의 사전 정의 매크로와 rcc의 타깃은
-그 타깃의 호스트 파일(`etc/llvm-x86_64-linux.c` 등)에서 가져오고, llc
+그 타깃의 호스트 파일(`etc/llvm-x86_64-linux.c`, `etc/mlir-x86_64-linux.c` 등)에서 가져오고, llc
 옵션은 그 파일의 `LLCFLAGS`를 쓴다. `LLCFLAGS`는 clang이 그 타깃에
 기본으로 주는 설정(RISC-V의 부동소수점 ABI, ARM의 VFP)이다. lcc의 다른
 드라이버들은 오브젝트를 clang으로 만들기 때문이다.
@@ -55,6 +60,23 @@ do_compile() {
 툴체인의 lcc는 gcc-cross처럼 레시피의 sysroot에 있으며, SDK에는
 들어가지 않는다.
 
+## MLIR 백엔드
+
+openembedded-core는 LLVM을 MLIR 없이 빌드한다. 그래서 MLIR 백엔드를 쓰려면 이 레이어의
+`mlir-native`가 같은 llvm-project 소스로 MLIR과 두 도구를 빌드해야 한다. 기본으로는 꺼져 있고,
+`local.conf`에서 켠다.
+
+```
+LCC_BACKENDS = "llvm mlir"
+
+# MLIR의 생성된 소스 몇 개는 컴파일에 몇 GB씩 쓴다. 메모리 15GB에서는 -j 3이 맞는다
+PARALLEL_MAKE:pn-mlir-native = "-j 3"
+```
+
+`mlir-native`는 처음 한 번 빌드에 30분쯤 걸린다(`-j 3`). 레시피는 meta-cminus의 것에 `mlir-opt`와
+`mlir-translate`를 빌드해 설치하는 부분을 더했다. 따로(standalone) 빌드한 MLIR은 도구를 기본 빌드에서
+빼고 설치하지도 않기 때문이다.
+
 ## 라이선스
 
 lcc의 라이선스는 `CPYRIGHT` 파일이다. 그 파일과 함께라면 재배포할 수
@@ -74,8 +96,6 @@ LICENSE_FLAGS_ACCEPTED += "commercial_lcc-runtime"
   `_TIME_BITS=64`로 빌드한다. 그래서 lcc 코드와 다른 라이브러리 사이에
   `time_t`가 든 인터페이스는 맞지 않는다.
   [저장소 README의 "armhf의 off_t와 time_t"](../README.md#armhf의-off_t와-time_t)를 보라.
-- LLVM 백엔드만 지원한다. MLIR 백엔드에는 MLIR 빌드가 필요한데
-  openembedded-core에는 없다.
 - `LAYERSERIES_COMPAT`에는 빌드해 본 시리즈인 `blacksail`만 적었다.
 
 ## 현황
@@ -83,15 +103,17 @@ LICENSE_FLAGS_ACCEPTED += "commercial_lcc-runtime"
 openembedded-core `c2ea956`(blacksail, 2026-11-08), LLVM 23.1.3,
 GCC 16.2로 빌드했고 [scripts/check-tests.sh](scripts/check-tests.sh)로
 확인했다. 모든 머신에서 `lcc-hello`가 사용자 모드 qemu로 `gcd 6`을
-출력하고, 모든 시험 묶음이 통과한다.
+출력하고, 두 드라이버 `lcc`와 `lcc-mlir`(MLIR 23.1.3) 모두 모든 시험 묶음이 통과한다.
 
-| `MACHINE` | lcc | unit | c-testsuite | torture | llvm-bench |
-| :- | :- | :- | :- | :- | :- |
-| `qemux86-64` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuarm64` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuriscv64` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuarm` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
-| `qemuriscv32` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `MACHINE` | 드라이버 | lcc | unit | c-testsuite | torture | llvm-bench |
+| :- | :- | :- | :- | :- | :- | :- |
+| `qemux86-64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuarm64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuriscv64` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuarm` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+| `qemuriscv32` | `lcc`, `lcc-mlir` | 18/18 | 25/25 | 144/144 | 618/618 | 26/26 |
+
+lcc의 MLIR 출력은 LLVM 21의 MLIR에 맞춰 만들었는데, Yocto의 MLIR 23에서도 고칠 것 없이 통과했다.
 
 Yocto 빌드에서만 드러난 것 세 가지:
 

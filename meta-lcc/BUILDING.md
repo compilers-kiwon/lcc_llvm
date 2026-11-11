@@ -73,6 +73,14 @@ SANITY_TESTED_DISTROS = ""
 `PARALLEL_MAKE`개 띄운다. 둘은 메모리에 맞춰 정한다. 15GB에는 4와
 `-j 6`이 맞는다.
 
+MLIR 백엔드(`${TARGET_PREFIX}lcc-mlir`)도 쓰려면 다음을 더한다. `mlir-native`가 MLIR을 빌드하며,
+이 레시피만 병렬도를 낮춘다. 15GB에서 `-j 3`으로 30분쯤 걸렸다.
+
+```
+LCC_BACKENDS = "llvm mlir"
+PARALLEL_MAKE:pn-mlir-native = "-j 3"
+```
+
 ## 6. 레이어 추가와 빌드
 
 ```bash
@@ -110,7 +118,8 @@ glibc가 호스트가 아니라 sysroot에 있다. `LD_LIBRARY_PATH`는 타깃 �
 
 머신마다 `lcc-hello`를 빌드해 실행한 뒤, 그 머신의 lcc로 저장소의
 `src/run-llvm.sh`를 돌린다. 묶음은 `lcc`(lcc 자체의 `tst/*.c`)와
-`unit`(`tst/llvm`; 드라이버는 툴체인의 gcc가 컴파일)이다. 머신마다 교차
+`unit`(`tst/llvm`; 드라이버는 툴체인의 gcc가 컴파일)이다. MLIR 백엔드를 켰으면
+`lcc-mlir`로도 같은 묶음을 돌린다. 머신마다 교차
 툴체인과 glibc를 새로 빌드한다. 외부 묶음은 체크아웃한 위치를 준다.
 
 ```bash
@@ -121,7 +130,7 @@ LLVM_TESTSUITE=/path/to/llvm-test-suite \
     ~/yocto/oe/lcc_llvm/meta-lcc/scripts/check-tests.sh qemux86-64
 ```
 
-결과는 `tmp/lcc-tests/MACHINE/`에 있다.
+결과는 `tmp/lcc-tests/MACHINE/`에 있다(`lcc-mlir`는 `mlir-` 접두사).
 
 ## 리비전 올리기
 
