@@ -13,7 +13,7 @@
 extern float fbig, fsmall, fsub, fzero, ftop;
 extern double dbig, dsmall, dsub, dzero, dtop;
 extern long double lbig, lsmall, lzero;
-extern double dneg(void), dsum(void);
+extern double dneg(void), dsum(void), zafter(void), nzero(void);
 extern float fprod(void);
 
 static int checks, bad;
@@ -39,11 +39,14 @@ int main(void) {
 	d1 = dneg(); d2 = c_dneg(); same("dneg", &d1, &d2, sizeof d1);
 	d1 = dsum(); d2 = c_dsum(); same("dsum", &d1, &d2, sizeof d1);
 	f1 = fprod(); f2 = c_fprod(); same("fprod", &f1, &f2, sizeof f1);
+	d1 = zafter(); d2 = c_zafter(); same("zafter", &d1, &d2, sizeof d1);
+	d1 = nzero(); d2 = c_nzero(); same("nzero", &d1, &d2, sizeof d1);
 	/* the expected values, not only as clang computes them */
 	checks++;
 	if (!(dbig > dtop && -dneg() > dtop && fbig > ftop
 	    && dsmall == 0 && fsmall == 0 && lsmall == 0 && fprod() == 0
-	    && dsub > 0 && fsub > 0 && dsum() == 1e-310)) {
+	    && dsub > 0 && fsub > 0 && dsum() == 1e-310 && zafter() == 0
+	    && 1 / nzero() < 0)) {
 		bad++;
 		printf("unexpected values\n");
 	}

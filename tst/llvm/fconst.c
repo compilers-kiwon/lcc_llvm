@@ -27,3 +27,8 @@ long double F(lzero) = 0e-9999L;
 double F(dneg)(void) { return -1e400 + 1; }
 double F(dsum)(void) { return 2e-400 + 1e-310; }
 float F(fprod)(void) { return 1e-46F * 2; }
+
+/* lcc's table of constants took 0.0 for a constant before it that float
+   makes 0, as 1e-310, and -0.0 must still differ from 0.0 */
+double F(zafter)(void) { double t = 1e-310, z = 0.0; return t > 0 ? z : 1; }
+double F(nzero)(void) { double z = 0.0, n = -0.0; return z == 0 ? n : 1; }
