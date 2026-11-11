@@ -27,6 +27,8 @@ char *cpp[] = { LCCDIR "cpp",
 	"-D__SIZEOF_POINTER__=4",
 	/* what newlib's headers take from gcc */
 	"-D__extension__=",
+	/* assert's message names the function, as with gcc and clang */
+	"-D__ASSERT_FUNC=__func__",
 	"-D__ORDER_LITTLE_ENDIAN__=1234", "-D__ORDER_BIG_ENDIAN__=4321",
 	"-D__BYTE_ORDER__=__ORDER_LITTLE_ENDIAN__",
 	"-D__INT_MAX__=0x7fffffff", "-D__LONG_MAX__=0x7fffffffL",
