@@ -17,7 +17,7 @@ B=$(BUILDDIR)/
 T=$(TSTDIR)/
 
 what:
-	-@echo make all rcc lburg cpp lcc bprint liblcc headers triple clean clobber
+	-@echo make all rcc lburg cpp lcc bprint liblcc headers board triple clean clobber
 
 all::	rcc lburg cpp lcc bprint liblcc
 
@@ -43,6 +43,22 @@ headers:
 	fi; \
 	echo "mkdir -p $Binclude && cp -R $$d/. $Binclude/"; \
 	mkdir -p $Binclude && cp -R $$d/. $Binclude/
+
+# board installs, in $(BUILDDIR), the files of the board that a target
+# without an operating system links with: for HOSTFILE=etc/llvm-cortexm3-eabi.c
+# or etc/mlir-cortexm3-eabi.c, etc/cortexm3/cortexm3.ld and vectors.o,
+# compiled from etc/cortexm3/vectors.c by $(BOARDCC)
+BOARDCC=arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -O1
+board:
+	@case '$(HOSTFILE)' in \
+	*llvm-cortexm3-eabi.c|*mlir-cortexm3-eabi.c) \
+		echo "$(BOARDCC) -c -o $Bvectors$O etc/cortexm3/vectors.c"; \
+		$(BOARDCC) -c -o $Bvectors$O etc/cortexm3/vectors.c || exit 1; \
+		echo "cp etc/cortexm3/cortexm3.ld $B"; \
+		cp etc/cortexm3/cortexm3.ld $B ;; \
+	*)	echo "make board: give HOSTFILE=etc/llvm-cortexm3-eabi.c or etc/mlir-cortexm3-eabi.c" 1>&2; \
+		exit 1 ;; \
+	esac
 
 RCCOBJS=$Balloc$O \
 	$Bbind$O \

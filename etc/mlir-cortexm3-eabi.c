@@ -4,8 +4,8 @@
    newlib's (libnewlib-arm-none-eabi); arm-none-eabi-gcc links with
    semihosting (rdimon), etc/cortexm3/cortexm3.ld and the vector table
    etc/cortexm3/vectors.c, which are LCCDIR/cortexm3.ld and LCCDIR/vectors.o
-   (compiled by arm-none-eabi-gcc); the programs run on qemu-system-arm
-   -M mps2-an385. */
+   (compiled by arm-none-eabi-gcc; make board installs both); the programs
+   run on qemu-system-arm -M mps2-an385. */
 
 #include <string.h>
 
