@@ -83,7 +83,7 @@ Symbol mkreg(char *fmt, int n, int mask, int set) {
 	p->name = p->x.name = stringf(fmt, n);
 	NEW0(p->x.regnode, PERM);
 	p->x.regnode->number = n;
-	p->x.regnode->mask = mask<<n;
+	p->x.regnode->mask = (unsigned)mask<<n;
 	p->x.regnode->set = set;
 	return p;
 }
@@ -646,6 +646,8 @@ static void ralloc(Node p) {
 					if (sym->u.t.cse && q->x.copy)
 						q->x.equatable = 1;
 				}
+				if (r->x.lastuse == NULL)
+					putreg(r);	/* nothing reads the temporary */
 			} else {
 				p->syms[RX] = r;
 				r->x.lastuse = p;
@@ -666,9 +668,12 @@ static Symbol spillee(Symbol set, unsigned mask[], Node here) {
 	else {
 		for (i = 31; i >= 0; i--) {
 			Symbol ri = set->x.wildcard[i];
+			/* ri's register may hold a value through another
+			   symbol for it, as %eax for %ax: uses() and spill()
+			   go by the mask, and so does this */
 			if (
 				ri != NULL &&
-				ri->x.lastuse &&
+				(ri->x.regnode->mask&~freemask[ri->x.regnode->set]) &&
 				(ri->x.regnode->mask&tmask[ri->x.regnode->set]&mask[ri->x.regnode->set])
 			) {
 				Regnode rn = ri->x.regnode;
