@@ -15,7 +15,8 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 
 **릴리스 파일로.** 빌드할 것 없이 x86_64 리눅스에서 바로 쓴다. 타깃·백엔드마다 압축 파일이 하나씩
 [Releases](https://github.com/compilers-kiwon/lcc_llvm/releases)에 있다. llvm 드라이버는 clang 18이, mlir
-드라이버는 LLVM 23이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)).
+드라이버는 LLVM 23이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)). 단 첫 릴리스 v4.2-llvm.1의
+mlir 압축은 기본값을 23으로 바꾸기 전에 만들어서 LLVM 21(`/usr/lib/llvm-21/bin`)을 쓴다.
 
 ```bash
 curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.1/lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
