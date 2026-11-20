@@ -57,7 +57,7 @@
 # the .ll it is given.  An lcc built with etc/mlir-x86_64-linux.c emits
 # MLIR instead (-target=mlir/x86_64-linux): the .mlir is lowered to LLVM
 # IR with mlir-opt and mlir-translate as its driver does, and checked
-# with opt, all three from $MLIRBIN (default /usr/lib/llvm-21/bin).
+# with opt, all three from $MLIRBIN (default /usr/lib/llvm-23/bin).
 #
 # Results are PASS, FAIL (wrong output or exit status), CFAIL (does not
 # compile, or the IR does not verify), TIMEOUT and SKIP.  The exit status is 0 only if every test that
@@ -171,7 +171,7 @@ else
 fi
 command -v $NM >/dev/null || NM=/usr/lib/llvm-18/bin/llvm-nm
 OPT=${OPT-opt}
-MLIRBIN=${MLIRBIN-/usr/lib/llvm-21/bin}
+MLIRBIN=${MLIRBIN-/usr/lib/llvm-23/bin}
 T=${outdir:-$BUILDDIR/llvm/$TARGET/tst/$suite}
 mkdir -p $T || exit 1
 

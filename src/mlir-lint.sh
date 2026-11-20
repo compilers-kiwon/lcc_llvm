@@ -29,7 +29,7 @@
 # llvm.mlir.global build their constants with llvm ops.  Text in strings
 # and comments is not checked, nor are operations in the generic form,
 # whose names are strings.  mlir-opt is $MLIRBIN/mlir-opt ($MLIRBIN is
-# /usr/lib/llvm-21/bin by default).
+# /usr/lib/llvm-23/bin by default).
 #
 # A violation is printed as file:line: and a message, or as file: and a
 # message if it has no line; an error of mlir-opt at a line of the file
@@ -52,7 +52,7 @@ case "$1" in
 -*|'')	usage ;;
 esac
 
-MLIRBIN=${MLIRBIN-/usr/lib/llvm-21/bin}
+MLIRBIN=${MLIRBIN-/usr/lib/llvm-23/bin}
 t=`mktemp -d` || exit 1
 trap 'rm -rf "$t"' 0
 trap 'exit 1' 1 2 15

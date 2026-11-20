@@ -1,5 +1,5 @@
 /* RISC-V 32 (rv32gc, ILP32D) Linux with the MLIR back end: rcc emits
-   .mlir; mlir-opt, mlir-translate and clang of LLVM 21 do the rest.
+   .mlir; mlir-opt, mlir-translate and clang of LLVM 23 do the rest.
    It is a cross compiler: LCCDIR/riscv32 is (a link to) a
    riscv-gnu-toolchain built for rv32gc/ilp32d, whose sysroot has glibc;
    clang links with its libgcc and crt files, and the programs run with
@@ -13,7 +13,7 @@ static char rcsid[] = "$Id$";
 #define LCCDIR "/usr/local/lib/lcc/"
 #endif
 #ifndef LLVMBIN
-#define LLVMBIN "/usr/lib/llvm-21/bin"
+#define LLVMBIN "/usr/lib/llvm-23/bin"
 #endif
 
 char *suffixes[] = { ".c", ".i", ".mlir", ".o", ".out", 0 };

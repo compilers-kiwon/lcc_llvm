@@ -1,5 +1,5 @@
 /* Cortex-M3 (thumbv7m, soft float, no OS) with the MLIR back end: rcc
-   emits .mlir; mlir-opt, mlir-translate and clang of LLVM 21 make an
+   emits .mlir; mlir-opt, mlir-translate and clang of LLVM 23 make an
    object.  It is a cross compiler: the C library is
    newlib's (libnewlib-arm-none-eabi); arm-none-eabi-gcc links with
    semihosting (rdimon), etc/cortexm3/cortexm3.ld and the vector table
@@ -15,7 +15,7 @@ static char rcsid[] = "$Id$";
 #define LCCDIR "/usr/local/lib/lcc/"
 #endif
 #ifndef LLVMBIN
-#define LLVMBIN "/usr/lib/llvm-21/bin"
+#define LLVMBIN "/usr/lib/llvm-23/bin"
 #endif
 
 char *suffixes[] = { ".c", ".i", ".mlir", ".o", ".out", 0 };

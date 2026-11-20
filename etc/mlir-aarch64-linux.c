@@ -1,5 +1,5 @@
 /* AArch64 Linux with the MLIR back end: rcc emits .mlir; mlir-opt,
-   mlir-translate and clang of LLVM 21 do the rest.  It is a cross
+   mlir-translate and clang of LLVM 23 do the rest.  It is a cross
    compiler: the headers and libraries are those of libc6-dev-arm64-cross,
    and the programs run with qemu-aarch64. */
 
@@ -11,7 +11,7 @@ static char rcsid[] = "$Id$";
 #define LCCDIR "/usr/local/lib/lcc/"
 #endif
 #ifndef LLVMBIN
-#define LLVMBIN "/usr/lib/llvm-21/bin"
+#define LLVMBIN "/usr/lib/llvm-23/bin"
 #endif
 
 char *suffixes[] = { ".c", ".i", ".mlir", ".o", ".out", 0 };
