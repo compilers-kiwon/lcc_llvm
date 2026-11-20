@@ -15,7 +15,7 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 
 **릴리스 파일로.** 빌드할 것 없이 x86_64 리눅스에서 바로 쓴다. 타깃·백엔드마다 압축 파일이 하나씩
 [Releases](https://github.com/compilers-kiwon/lcc_llvm/releases)에 있다. llvm 드라이버는 clang 18이, mlir
-드라이버는 LLVM 21이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)).
+드라이버는 LLVM 23이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)).
 
 ```bash
 curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.1/lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
@@ -44,7 +44,7 @@ LCCDIR=$B $B/lcc -o hello hello.c && ./hello
 | :- | :- |
 | 프론트엔드 | lcc 4.2 그대로(C89). 표준이 컴파일러에 맡긴 것은 gcc·clang을 따름 |
 | 백엔드 출력 | 텍스트 `.ll`(`-target=llvm/T`) 또는 `.mlir`(`-target=mlir/T`). LLVM 라이브러리를 링크하지 않음 |
-| 오브젝트 | llvm: clang 18 / mlir: LLVM 21의 `mlir-opt` → `mlir-translate` → clang |
+| 오브젝트 | llvm: clang 18 / mlir: LLVM 23의 `mlir-opt` → `mlir-translate` → clang |
 | 링크 | clang(교차 타깃은 lld) / Cortex-M3는 `arm-none-eabi-gcc` |
 | ABI | 구조체 인자·결과, 가변 인자, long double, 비트 필드를 타깃 ABI대로. gcc·clang 오브젝트와 섞어 링크 가능 |
 | MLIR 방언 | 값과 제어는 `func`·`arith`·`cf`, 메모리·전역·ABI는 `llvm` |
@@ -71,7 +71,7 @@ LCCDIR=$B $B/lcc -o hello hello.c && ./hello
 | :- | :- |
 | 모든 타깃 | gcc(또는 cc), make |
 | `llvm/*` | clang 18(`/usr/bin/clang`), 교차 타깃은 lld |
-| `mlir/*` | LLVM 21(`/usr/lib/llvm-21/bin`) |
+| `mlir/*` | LLVM 23(`/usr/lib/llvm-23/bin`) |
 | aarch64, riscv64, armhf | `libc6-dev-{arm64,riscv64,armhf}-cross`, 그 gcc(liblcc용), `qemu-user` |
 | riscv32 | glibc·rv32gc·ilp32d인 `riscv32-unknown-linux-gnu` 툴체인([riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)). Ubuntu 패키지 없음 |
 | cortexm3-eabi | `gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`, `qemu-system-arm` |
@@ -111,7 +111,7 @@ make BUILDDIR=$B CC="arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -fno-short-enums"
 | :- | :- | :- |
 | `LCCDIR` | `/usr/local/lib/lcc/` | cpp, rcc, lcc 헤더, liblcc가 있는 곳 |
 | `CLANG` | `/usr/bin/clang` | llvm 드라이버의 오브젝트 생성과 링크 |
-| `LLVMBIN` | `/usr/lib/llvm-21/bin` | mlir 드라이버의 `mlir-opt`, `mlir-translate`, clang |
+| `LLVMBIN` | `/usr/lib/llvm-23/bin` | mlir 드라이버의 `mlir-opt`, `mlir-translate`, clang |
 | `SYSROOT` | `/usr/aarch64-linux-gnu` 등 | 교차 타깃의 C 라이브러리 헤더 |
 | `ARMGCC` | `/usr/bin/arm-none-eabi-gcc` | cortexm3-eabi의 링크 |
 

@@ -113,7 +113,8 @@ GCC 16.2로 빌드했고 [scripts/check-tests.sh](scripts/check-tests.sh)로
 | `qemuarm` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
 | `qemuriscv32` | `lcc`, `lcc-mlir` | 19/19 | 25/25 | 144/144 | 618/618 | 26/26 |
 
-lcc의 MLIR 출력은 LLVM 21의 MLIR에 맞춰 만들었는데, Yocto의 MLIR 23에서도 고칠 것 없이 통과했다.
+lcc의 mlir 드라이버는 기본으로 LLVM 23의 MLIR을 쓴다(저장소에서는 apt.llvm.org의 23.1.6으로
+시험한다). lcc의 MLIR 출력은 Yocto의 MLIR 23.1.3에서도 고칠 것 없이 통과했다.
 
 Yocto 빌드에서만 드러난 것 세 가지:
 
