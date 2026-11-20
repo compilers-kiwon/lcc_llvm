@@ -3,7 +3,7 @@
 # for one target and back end, as CI does, on Ubuntu 24.04
 #
 #   deps   install what building and testing need: clang 18 and lld (llvm),
-#          LLVM 21 with MLIR from apt.llvm.org (mlir), the target's cross gcc
+#          LLVM 23 with MLIR from apt.llvm.org (mlir), the target's cross gcc
 #          and C library, qemu (user mode; system for cortexm3-eabi) and
 #          binfmt_misc for selfhost.sh
 #   build  build lcc in builddir with etc/BACKEND-TARGET.c: cpp, rcc, the
@@ -33,11 +33,11 @@ deps)
 	sudo apt-get update -q
 	sudo apt-get install -y -q --no-install-recommends $pkgs
 	if [ $BE = mlir ]; then
-		# the mlir drivers run mlir-opt, mlir-translate and clang of LLVM 21
+		# the mlir drivers run mlir-opt, mlir-translate and clang of LLVM 23
 		wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-		sudo bash /tmp/llvm.sh 21
+		sudo bash /tmp/llvm.sh 23
 		sudo apt-get install -y -q --no-install-recommends \
-			clang-21 lld-21 llvm-21 mlir-21-tools
+			clang-23 lld-23 llvm-23 mlir-23-tools
 	fi ;;
 build)
 	[ -n "$B" ] || { echo "usage: $0 build target backend builddir" 1>&2; exit 2; }
