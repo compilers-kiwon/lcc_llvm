@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+@LIT_SITE_CFG_IN_HEADER@
+
+config.llvm_tools_dir = lit_config.substitute("@LLVM_TOOLS_DIR@")
+config.lcc_opt_obj_root = "@PROJECT_BINARY_DIR@"
+config.lcc_opt_tools_dir = "@LLVM_RUNTIME_OUTPUT_INTDIR@"
+
+import lit.llvm
+
+lit.llvm.initialize(lit_config, config)
+
+# Let the main config do the real work.
+lit_config.load_config(config, "@PROJECT_SOURCE_DIR@/test/lit.cfg.py")
