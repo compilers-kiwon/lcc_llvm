@@ -24,6 +24,7 @@ add_mlir_library(LccOptPasses
   )
 mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRAffineDialect
+  MLIRAffineToStandard
   MLIRArithDialect
   MLIRArithToLLVM
   MLIRControlFlowDialect
@@ -35,6 +36,8 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRFunctionInterfaces
   MLIRLLVMDialect
   MLIRMemRefDialect
+  MLIRMemRefToLLVM
+  MLIRMemRefTransforms
   MLIRPass
   MLIRReconcileUnrealizedCasts
   MLIRSCFDialect
@@ -43,4 +46,6 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRTransforms
   MLIRUBDialect
   MLIRUBToLLVM
+  MLIRVectorToLLVMPass
+  MLIRVectorToSCF
   )

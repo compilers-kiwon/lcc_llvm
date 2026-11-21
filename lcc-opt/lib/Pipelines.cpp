@@ -6,13 +6,18 @@
 
 #include "lcc-opt/Passes.h"
 
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/ControlFlowToSCF/ControlFlowToSCF.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/UBToLLVM/UBToLLVM.h"
+#include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVMPass.h"
+#include "mlir/Conversion/VectorToSCF/VectorToSCF.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/Passes.h"
@@ -56,9 +61,36 @@ void lcc::buildToSCFPipeline(OpPassManager &pm) {
   pm.addPass(createCSEPass());
 }
 
+void lcc::buildToAffinePipeline(OpPassManager &pm,
+                                const ToAffineOptions &options) {
+  buildToSCFPipeline(pm);
+  pm.addPass(createLccIndexLoops());
+  LccGlobalsToMemrefOptions globals;
+  globals.remarks = options.remarks;
+  pm.addPass(createLccGlobalsToMemref(globals));
+  pm.addPass(createCanonicalizerPass());
+  pm.addPass(createCSEPass());
+  LccScfToAffineOptions affine;
+  affine.remarks = options.remarks;
+  pm.addPass(createLccScfToAffine(affine));
+  pm.addPass(createCanonicalizerPass());
+  pm.addPass(createCSEPass());
+}
+
 void lcc::buildLowerPipeline(OpPassManager &pm) {
+  pm.addPass(createConvertVectorToSCFPass());
+  // Early: convert-vector-to-llvm first rewrites the whole module greedily.
+  // After convert-scf-to-cf that would fold blocks so that the cases of a
+  // switch pass block arguments to the same block, which mlir-translate
+  // (MLIR 23) splits in an order that changes from run to run; before, the
+  // LLVM IR of code without vectors is that of lcc-lower without these
+  // passes.
+  pm.addPass(createConvertVectorToLLVMPass());
+  pm.addPass(memref::createExpandStridedMetadataPass());
+  pm.addPass(createLowerAffinePass());
   pm.addPass(createSCFToControlFlowPass());
   pm.addPass(createUBToLLVMConversionPass());
+  pm.addPass(createFinalizeMemRefToLLVMConversionPass());
   pm.addPass(createArithToLLVMConversionPass());
   pm.addPass(createConvertControlFlowToLLVMPass());
   pm.addPass(createConvertFuncToLLVMPass());
@@ -82,10 +114,19 @@ void lcc::registerLccOptPasses() {
       "lcc-uplift-while, canonicalize, loop-invariant-code-motion, "
       "canonicalize, cse)",
       buildToSCFPipeline);
+  PassPipelineRegistration<ToAffineOptions>(
+      "lcc-to-affine",
+      "Raise lcc's loop nests on global arrays to affine (lcc-to-scf, "
+      "lcc-index-loops, lcc-globals-to-memref, canonicalize, cse, "
+      "lcc-scf-to-affine, canonicalize, cse)",
+      buildToAffinePipeline);
   PassPipelineRegistration<>(
       "lcc-lower",
-      "Lower the output of lcc-to-scf to the LLVM dialect for mlir-translate "
-      "(convert-scf-to-cf, convert-ub-to-llvm, convert-arith-to-llvm, "
-      "convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts)",
+      "Lower the output of lcc-to-scf or lcc-to-affine to the LLVM dialect "
+      "for mlir-translate (convert-vector-to-scf, convert-vector-to-llvm, "
+      "expand-strided-metadata, lower-affine, convert-scf-to-cf, "
+      "convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm, "
+      "convert-cf-to-llvm, convert-func-to-llvm, "
+      "reconcile-unrealized-casts)",
       buildLowerPipeline);
 }

@@ -9,6 +9,7 @@
 
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassOptions.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -106,12 +107,37 @@ void buildPreparePipeline(mlir::OpPassManager &pm);
 /// `after` region (WhileMoveIfDown of MLIR 23).
 void buildToSCFPipeline(mlir::OpPassManager &pm);
 
-/// Adds the lcc-lower pipeline to `pm`: convert-scf-to-cf,
-/// convert-ub-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm,
-/// convert-func-to-llvm, reconcile-unrealized-casts.  It lowers the output
-/// of lcc-to-scf to the LLVM dialect for mlir-translate: lcc's driver lowers
-/// only arith, cf and func, but lcc-to-scf leaves scf and, from
-/// lift-cf-to-scf, ub.poison.
+/// Options of the lcc-to-affine pipeline.
+struct ToAffineOptions : public mlir::PassPipelineOptions<ToAffineOptions> {
+  Option<bool> remarks{
+      *this, "remarks",
+      llvm::cl::desc("Report each global and loop nest lcc-globals-to-memref "
+                     "and lcc-scf-to-affine change or leave, as remarks"),
+      llvm::cl::init(false)};
+};
+
+/// Adds the lcc-to-affine pipeline to `pm`: lcc-to-scf, lcc-index-loops,
+/// lcc-globals-to-memref, canonicalize, cse, lcc-scf-to-affine,
+/// canonicalize, cse.  It turns counting loops into index scf.for loops,
+/// global arrays into 1-D memref.global with memref.load and memref.store,
+/// and loop nests that only compute and access such memrefs at affine
+/// indices into affine.for with affine.load and affine.store.
+void buildToAffinePipeline(mlir::OpPassManager &pm,
+                           const ToAffineOptions &options);
+
+/// Adds the lcc-lower pipeline to `pm`: convert-vector-to-scf,
+/// convert-vector-to-llvm, expand-strided-metadata, lower-affine,
+/// convert-scf-to-cf, convert-ub-to-llvm, finalize-memref-to-llvm,
+/// convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm,
+/// reconcile-unrealized-casts.  It lowers the output of lcc-to-scf and
+/// lcc-to-affine, also after upstream affine transformations such as
+/// affine-loop-tile and affine-super-vectorize, to the LLVM dialect for
+/// mlir-translate: lcc's driver lowers only arith, cf and func, but these
+/// leave scf, ub.poison (from lift-cf-to-scf), affine, memref and vector.
+/// convert-vector-to-llvm comes early: its greedy rewriting of the whole
+/// module, on cf, would make switches whose cases pass block arguments to
+/// the same block, which mlir-translate splits in an order that changes
+/// from run to run.
 void buildLowerPipeline(mlir::OpPassManager &pm);
 
 /// Registers the passes and pipelines of lcc-opt with the global registry.
