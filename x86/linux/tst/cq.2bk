@@ -1,6 +1,6 @@
 tst/cq.c:394: warning: overflow in converting constant expression from `unsigned long' to `long int'
-tst/cq.c:394: warning: overflow in converting constant expression from `unsigned long' to `long int'
-tst/cq.c:394: warning: overflow in converting constant expression from `unsigned long' to `long int'
+tst/cq.c:394: warning: overflow in converting constant expression from `unsigned int' to `long int'
+tst/cq.c:394: warning: overflow in converting constant expression from `unsigned int' to `long int'
 tst/cq.c:395: warning: overflow in constant `4294967296'
 tst/cq.c:395: warning: overflow in converting constant expression from `unsigned long' to `long int'
 tst/cq.c:395: warning: overflow in constant `040000000000'

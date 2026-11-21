@@ -720,14 +720,18 @@ static Symbol icon(unsigned long n, int overflow, int base) {
 		else
 			tval.type = longtype;
 		cp += 1;
-	} else if (overflow || n > longtype->u.sym->u.limits.max.i)
+	} else if (overflow)
 		tval.type = unsignedlong;
-	else if (n > inttype->u.sym->u.limits.max.i)
-		tval.type = longtype;
-	else if (base != 10 && n > inttype->u.sym->u.limits.max.i)
-		tval.type = unsignedtype;
-	else
+	else if (n <= inttype->u.sym->u.limits.max.i)
 		tval.type = inttype;
+	/* C89 3.1.3.2: unsigned int comes before long for octal and
+	   hexadecimal constants, not for decimal ones */
+	else if (base != 10 && n <= unsignedtype->u.sym->u.limits.max.u)
+		tval.type = unsignedtype;
+	else if (n <= longtype->u.sym->u.limits.max.i)
+		tval.type = longtype;
+	else
+		tval.type = unsignedlong;
 	switch (tval.type->op) {
 	case INT:
 		if (overflow || n > tval.type->u.sym->u.limits.max.i) {
