@@ -173,7 +173,7 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
 | 묶음 | 내용 | 수 |
 | :- | :- | :- |
 | `lcc` | lcc 자체의 `tst/*.c`. 표준 출력과 컴파일러 메시지를 기준 파일과 비교 | 19 |
-| `unit` | `tst/llvm/NAME.c`를 lcc로, `NAME-drv.c`를 clang이나 gcc로 컴파일해 링크하고 결과 확인 | 25 |
+| `unit` | `tst/llvm/NAME.c`를 lcc로, `NAME-drv.c`를 clang이나 gcc로 컴파일해 링크하고 결과 확인 | 26 |
 | `c-testsuite` | [c-testsuite](https://github.com/c-testsuite/c-testsuite)의 C89 시험 | 144 |
 | `torture` | GCC torture 시험(LLVM test-suite 안)의 C89 시험 | 618 |
 | `llvm-bench` | [LLVM test-suite](https://github.com/llvm/llvm-test-suite)의 벤치마크 | 26 |
