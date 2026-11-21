@@ -8,8 +8,9 @@
 #define I(n) c_##n
 #include "iconst.c"
 
-extern int kinds[];
+extern int kinds[], ucmp[], ucmpsize, calls;
 extern long folded[];
+int ucase(int), ucmpside(void);
 long hexadd(int), hexneg(int), hexlt(int), octadd(int), hexshl(int), hexdiv(int);
 
 static int n, bad;
@@ -34,12 +35,20 @@ int main(void) {
 	for (i = 0; i < (int)(sizeof lf / sizeof lf[0]); i++)
 		for (x = -3; x <= 3; x++)
 			chk("function", i, lf[i](x), cf[i](x));
+	for (i = 0; i < (int)(sizeof c_ucmp / sizeof c_ucmp[0]); i++)
+		chk("ucmp", i, ucmp[i], c_ucmp[i]);
+	chk("ucmpsize", 0, ucmpsize, c_ucmpsize);
+	for (x = -2; x <= 2; x++)
+		chk("ucase", x, ucase(x), c_ucase(x));
+	chk("ucmpside", 0, ucmpside(), c_ucmpside());
+	chk("calls", 0, calls, c_calls);
 	/* the expected values, not only as clang computes them */
 	n++;
-	if (!(kinds[5] == 2 * (int)sizeof(unsigned) + 1 && kinds[6] == kinds[5]
+	if (!(kinds[5] == 2 * (int)sizeof(unsigned) && kinds[6] == kinds[5]
 	    && kinds[9] == kinds[5] && folded[0] == 0 && hexadd(1) == 0
 	    && hexneg(1) == 0x80000001L && hexlt(1) == 0 && hexshl(1) == 0
-	    && hexdiv(1) == 0)) {
+	    && hexdiv(1) == 0 && ucmp[0] == 0 && ucmp[3] == 1 && ucmpsize == 2
+	    && ucase(0) == 10 && ucase(1) == 11 && calls == 4)) {
 		bad++;
 		printf("unexpected values\n");
 	}

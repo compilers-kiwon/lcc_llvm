@@ -3,7 +3,8 @@
  * hexadecimal constant has the first of int, unsigned int, long and
  * unsigned long that holds its value, a decimal one the first of int,
  * long and unsigned long; a suffix u or l leaves out the types without
- * it.  Compiled by lcc; iconst-drv.c includes this file again with I(n)
+ * it.  An unsigned constant compared with 0 is a constant expression
+ * too.  Compiled by lcc; iconst-drv.c includes this file again with I(n)
  * renaming the objects, compiled by clang, and compares.
  */
 #ifndef I
@@ -11,9 +12,9 @@
 #endif
 #include "port.h"
 
-/* K(c): twice the size of the type of c, plus 1 if the type is unsigned
-   (not with < 0, which lcc does not fold for unsigned constants) */
-#define K(c) ((int)sizeof(c) * 2 + ((c) * 0 - 1 > 0))
+/* K(c): twice the size of the type of c, plus 1 if the type is signed;
+   (c) * 0 - 1 < 0 is a constant expression for unsigned c too */
+#define K(c) ((int)sizeof(c) * 2 + ((c) * 0 - 1 < 0))
 
 int I(kinds)[] = {
 	K(0), K(00), K(0x0), K(1),
@@ -46,3 +47,26 @@ long I(hexlt)(int x) { return -x < 0xffffffff; }
 long I(octadd)(int x) { return 037777777777 + x; }
 long I(hexshl)(int x) { return 0x80000000 << (x & 1); }
 long I(hexdiv)(int x) { return 0xfffffffe / -(x | 1); }
+
+/* unsigned constants compared with 0, folded (lcc used to make them
+   (constant, 0) and (constant, 1), which are not constant expressions),
+   and an operand that is not constant, whose side effects stay */
+int I(ucmp)[] = {
+	0u - 1 < 0, 0 > 0u - 1, 0u - 1 >= 0, 0 <= 0u - 1,
+	0u < 0, 0 > 0u, 0u >= 0, 0 <= 0u,
+	3u < 0, 0 < 3u, 3u > 0, 0 >= 3u, 3u <= 0, 0ul > 0
+};
+int I(ucmpsize) = sizeof(char [(0u <= 0) + (0 > 0u) + 1]);
+int I(ucase)(int x) {
+	switch (x) {
+	case 0u < 0: return 10;
+	case 0 <= 5u: return 11;
+	}
+	return 12;
+}
+int I(calls);
+unsigned I(bump)(void) { return ++I(calls); }
+int I(ucmpside)(void) {
+	return (I(bump)() < 0) + (0 > I(bump)()) + 2 * (I(bump)() >= 0)
+	    + 4 * (0 <= I(bump)());
+}
