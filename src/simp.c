@@ -502,24 +502,24 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 		case GE+F: qcfoldcnst(c == 1 || c == 0); cfoldcnst(F,d,>=); break;
 		case GE+I: cfoldcnst(I,i,>=); break;
 		case GE+U:
+			cfoldcnst(U,u,>=);	/* first: (l,1) is not a constant */
 			geu(l,r,1);	/* l >= 0 => (l,1) */
-			cfoldcnst(U,u,>=);
 			if (l->op == CNST+U && l->u.v.u == 0)	/* 0 >= r => r == 0 */
 				return eqtree(EQ, r, l);
 			break;
 		case GT+F: qcfoldcnst(c == 1); cfoldcnst(F,d, >); break;
 		case GT+I: cfoldcnst(I,i, >); break;
 		case GT+U:
-			geu(r,l,0);	/* 0 > r => (r,0) */
 			cfoldcnst(U,u, >);
+			geu(r,l,0);	/* 0 > r => (r,0) */
 			if (r->op == CNST+U && r->u.v.u == 0)	/* l > 0 => l != 0 */
 				return eqtree(NE, l, r);
 			break;
 		case LE+F: qcfoldcnst(c == -1 || c == 0); cfoldcnst(F,d,<=); break;
 		case LE+I: cfoldcnst(I,i,<=); break;
 		case LE+U:
-			geu(r,l,1);	/* 0 <= r => (r,1) */
 			cfoldcnst(U,u,<=);
+			geu(r,l,1);	/* 0 <= r => (r,1) */
 			if (r->op == CNST+U && r->u.v.u == 0)	/* l <= 0 => l == 0 */
 				return eqtree(EQ, l, r);
 			break;
@@ -553,8 +553,8 @@ Tree simplify(int op, Type ty, Tree l, Tree r) {
 		case LT+F: qcfoldcnst(c == -1); cfoldcnst(F,d, <); break;
 		case LT+I: cfoldcnst(I,i, <); break;
 		case LT+U:
-			geu(l,r,0);	/* l < 0 => (l,0) */
 			cfoldcnst(U,u, <);
+			geu(l,r,0);	/* l < 0 => (l,0) */
 			if (l->op == CNST+U && l->u.v.u == 0)	/* 0 < r => r != 0 */
 				return eqtree(NE, r, l);
 			break;
