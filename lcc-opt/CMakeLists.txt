@@ -49,9 +49,11 @@ set(LLVM_EXTERNAL_LIT "${LLVM_TOOLS_BINARY_DIR}/lit" CACHE STRING
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_BINARY_DIR}/include)
 separate_arguments(LCC_OPT_LLVM_DEFINITIONS NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LCC_OPT_LLVM_DEFINITIONS})
 
+add_subdirectory(include/lcc-opt)
 add_subdirectory(lib)
 
 set(LLVM_LINK_COMPONENTS Support)
