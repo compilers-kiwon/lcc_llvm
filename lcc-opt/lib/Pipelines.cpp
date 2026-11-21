@@ -81,10 +81,9 @@ void lcc::buildLowerPipeline(OpPassManager &pm) {
   pm.addPass(createConvertVectorToSCFPass());
   // Early: convert-vector-to-llvm first rewrites the whole module greedily.
   // After convert-scf-to-cf that would fold blocks so that the cases of a
-  // switch pass block arguments to the same block, which mlir-translate
-  // (MLIR 23) splits in an order that changes from run to run; before, the
-  // LLVM IR of code without vectors is that of lcc-lower without these
-  // passes.
+  // switch pass block arguments to the same block, which needs the blocks
+  // of lcc-distinct-successors; before, the LLVM IR of code without vectors
+  // is that of lcc-lower without these passes.
   pm.addPass(createConvertVectorToLLVMPass());
   pm.addPass(memref::createExpandStridedMetadataPass());
   pm.addPass(createLowerAffinePass());
@@ -95,6 +94,7 @@ void lcc::buildLowerPipeline(OpPassManager &pm) {
   pm.addPass(createConvertControlFlowToLLVMPass());
   pm.addPass(createConvertFuncToLLVMPass());
   pm.addPass(createReconcileUnrealizedCastsPass());
+  pm.addPass(createLccDistinctSuccessors());
 }
 
 void lcc::registerLccOptPasses() {
@@ -127,6 +127,6 @@ void lcc::registerLccOptPasses() {
       "expand-strided-metadata, lower-affine, convert-scf-to-cf, "
       "convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm, "
       "convert-cf-to-llvm, convert-func-to-llvm, "
-      "reconcile-unrealized-casts)",
+      "reconcile-unrealized-casts, lcc-distinct-successors)",
       buildLowerPipeline);
 }

@@ -56,6 +56,29 @@ def LccByvalCopy : Pass<"lcc-byval-copy"> {
   let dependentDialects = ["mlir::LLVM::LLVMDialect"];
 }
 
+def LccDistinctSuccessors : Pass<"lcc-distinct-successors"> {
+  let summary = "Split repeated successors with arguments, in order";
+  let description = [{
+    The PHI nodes of LLVM IR tell their incoming values apart by the
+    predecessor, so a terminator that branches to the same block with
+    arguments more than once, as an llvm.switch whose cases pass different
+    values to one block, cannot be translated as it is.  When mlir-translate
+    legalizes the module for export (ensureDistinctSuccessors of MLIR 23),
+    it gives every second and later occurrence of such a successor a new
+    block that branches on to it, but creates those blocks iterating over a
+    hash map keyed by block pointers: with two or more such successors in
+    one terminator, the order of the new blocks, and so the LLVM IR, changes
+    from run to run.
+
+    This pass does the same before, in the order of the successors: the
+    second and later occurrences of a successor with arguments are
+    retargeted to a new block, appended to the region, that takes the same
+    arguments and branches to the successor with them (llvm.br).
+    mlir-translate then finds nothing to split.  lcc-lower runs it last.
+  }];
+  let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
 def LccHoistAllocas : Pass<"lcc-hoist-allocas"> {
   let summary = "Move constant size llvm.alloca into the entry block";
   let description = [{

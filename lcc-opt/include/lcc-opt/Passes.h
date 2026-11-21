@@ -129,15 +129,15 @@ void buildToAffinePipeline(mlir::OpPassManager &pm,
 /// convert-vector-to-llvm, expand-strided-metadata, lower-affine,
 /// convert-scf-to-cf, convert-ub-to-llvm, finalize-memref-to-llvm,
 /// convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm,
-/// reconcile-unrealized-casts.  It lowers the output of lcc-to-scf and
-/// lcc-to-affine, also after upstream affine transformations such as
-/// affine-loop-tile and affine-super-vectorize, to the LLVM dialect for
-/// mlir-translate: lcc's driver lowers only arith, cf and func, but these
-/// leave scf, ub.poison (from lift-cf-to-scf), affine, memref and vector.
-/// convert-vector-to-llvm comes early: its greedy rewriting of the whole
-/// module, on cf, would make switches whose cases pass block arguments to
-/// the same block, which mlir-translate splits in an order that changes
-/// from run to run.
+/// reconcile-unrealized-casts, lcc-distinct-successors.  It lowers the
+/// output of lcc-to-scf and lcc-to-affine, also after upstream affine
+/// transformations such as affine-loop-tile and affine-super-vectorize, to
+/// the LLVM dialect for mlir-translate: lcc's driver lowers only arith, cf
+/// and func, but these leave scf, ub.poison (from lift-cf-to-scf), affine,
+/// memref and vector.  lcc-distinct-successors makes the LLVM IR of
+/// mlir-translate the same from run to run.  convert-vector-to-llvm comes
+/// early: its greedy rewriting of the whole module, on cf, would make
+/// switches whose cases pass block arguments to the same block.
 void buildLowerPipeline(mlir::OpPassManager &pm);
 
 /// Registers the passes and pipelines of lcc-opt with the global registry.
