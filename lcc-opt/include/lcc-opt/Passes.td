@@ -242,6 +242,33 @@ def LccUpliftWhile : Pass<"lcc-uplift-while"> {
   ];
 }
 
+def LccIndexLoops : Pass<"lcc-index-loops"> {
+  let summary = "Turn integer scf.for loops into index scf.for loops";
+  let description = [{
+    lcc's loops come out of lcc-to-scf as scf.for of the type of the C loop
+    variable, mostly i32; affine.for, and the upstream loop transformations
+    in general, take index loops.  This pass makes an index loop of every
+    scf.for of an integer type iN whose values index can hold, with the
+    bounds and the step cast to index, and gives the body the induction
+    variable cast back to iN, which is exact since every value of the
+    induction variable fits in iN.  It does so for a `scf.for unsigned` too,
+    which becomes a signed index loop with the bounds zero-extended, when
+    the bounds are non-negative as signed numbers of the width of index:
+    always when N is less than that width, and otherwise when the ranges of
+    the bounds show it, together with `ub + step - 1` not wrapping
+    (LinearAnalysis); other loops are left alone.
+
+    Where the body extends the induction variable, `arith.extsi` (signed
+    loops) or `arith.extui` (unsigned loops) to iM, or casts it to index
+    with `arith.index_cast` or `arith.index_castui`, it uses the index
+    induction variable, cast to iM, instead, which is the same value.
+  }];
+  let dependentDialects = [
+    "mlir::arith::ArithDialect",
+    "mlir::scf::SCFDialect",
+  ];
+}
+
 def LccScfToAffine : Pass<"lcc-scf-to-affine"> {
   let summary = "Raise index scf.for loop nests on memrefs to affine.for";
   let description = [{
