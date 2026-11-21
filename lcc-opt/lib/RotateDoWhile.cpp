@@ -8,15 +8,16 @@
 // `v` the condition arguments, `y` the after block arguments and the after
 // region yielding `y[fwd[j]]` for `x[j]`, a do-while loop
 //
-//   while (x = init) { body(x); condition(next(x) < ub) v } do (y) { yield y[fwd] }
+//   while (x = init) { body(x); condition(P(next(x), ub)) v } do (y) { yield y[fwd] }
 //
 // becomes
 //
-//   while (x = init) { condition(x[iv] < ub) x } do (x) { body(x); yield v[fwd] }
+//   while (x = init) { condition(P(x[iv], ub)) x } do (x) { body(x); yield v[fwd] }
 //
 // where next(x) is v[fwd[iv]], so every test after the first compares the
-// value the old loop compared, and the first test, init[iv] < ub, is true
-// as in the old loop, which always runs its body once.  A result of the old
+// very values the old loop compared, whatever P and next are, and the first
+// test, P(init[iv], ub), is true as in the old loop, which always runs its
+// body once.  (ub may be on the left of P as well.)  A result of the old
 // loop is v[i] of the last iteration; for i = fwd[j] that is the new result
 // j.  The other v[i] are dealt with in rotate().
 //
@@ -48,10 +49,12 @@ namespace {
 struct DoWhile {
   /// The number of the before block argument that is the induction variable.
   unsigned iv;
-  /// The upper bound, defined outside the loop.
+  /// The bound, defined outside the loop.
   Value ub;
-  /// The old comparison `next < ub`.
+  /// The old comparison, `P(next, ub)` or `P(ub, next)`.
   arith::CmpIOp cmp;
+  /// Whether next is on the left of the comparison.
+  bool left;
   /// fwd[j]: the after block argument the after region yields for before
   /// block argument j, that is, the condition argument passed on to it.
   SmallVector<unsigned> fwd;
@@ -78,41 +81,33 @@ static std::optional<DoWhile> matchDoWhile(scf::WhileOp loop) {
     dw.fwd.push_back(arg.getArgNumber());
   }
 
-  // The condition is `cmpi slt, next, ub` with ub defined outside the loop.
+  // The condition is `cmpi P, next, ub` or `cmpi P, ub, next`, with ub
+  // defined outside the loop and next the value passed on to a before block
+  // argument iv, and P(init[iv], ub) folds to true.
   dw.cmp = cond.getCondition().getDefiningOp<arith::CmpIOp>();
-  if (!dw.cmp || dw.cmp->getBlock() != before ||
-      dw.cmp.getPredicate() != arith::CmpIPredicate::slt)
+  if (!dw.cmp || dw.cmp->getBlock() != before)
     return std::nullopt;
-  dw.ub = dw.cmp.getRhs();
-  if (!loop.isDefinedOutsideOfLoop(dw.ub))
-    return std::nullopt;
-
-  // next is `addi iv, step` or `addi step, iv`, with iv a before block
-  // argument and step a positive constant defined outside the loop.
-  auto add = dw.cmp.getLhs().getDefiningOp<arith::AddIOp>();
-  if (!add)
-    return std::nullopt;
-  for (auto [ivValue, step] : {std::pair(add.getLhs(), add.getRhs()),
-                               std::pair(add.getRhs(), add.getLhs())}) {
-    auto iv = dyn_cast<BlockArgument>(ivValue);
-    if (!iv || iv.getOwner() != before)
+  for (bool left : {true, false}) {
+    Value next = left ? dw.cmp.getLhs() : dw.cmp.getRhs();
+    Value ub = left ? dw.cmp.getRhs() : dw.cmp.getLhs();
+    APInt bound;
+    if (!loop.isDefinedOutsideOfLoop(ub) ||
+        !matchPattern(ub, m_ConstantInt(&bound)))
       continue;
-    APInt stepValue;
-    if (!loop.isDefinedOutsideOfLoop(step) ||
-        !matchPattern(step, m_ConstantInt(&stepValue)) ||
-        !stepValue.isStrictlyPositive())
-      continue;
-    // next is the value passed on to iv.
-    unsigned j = iv.getArgNumber();
-    if (cond.getArgs()[dw.fwd[j]] != add.getResult())
-      continue;
-    // The first test folds to true.
-    APInt init, ub;
-    if (!matchPattern(loop.getInits()[j], m_ConstantInt(&init)) ||
-        !matchPattern(dw.ub, m_ConstantInt(&ub)) || !init.slt(ub))
-      continue;
-    dw.iv = j;
-    return dw;
+    for (unsigned j = 0; j < dw.fwd.size(); j++) {
+      APInt init;
+      if (cond.getArgs()[dw.fwd[j]] != next ||
+          !matchPattern(loop.getInits()[j], m_ConstantInt(&init)))
+        continue;
+      arith::CmpIPredicate p = dw.cmp.getPredicate();
+      if (!(left ? arith::applyCmpPredicate(p, init, bound)
+                 : arith::applyCmpPredicate(p, bound, init)))
+        continue;
+      dw.iv = j;
+      dw.ub = ub;
+      dw.left = left;
+      return dw;
+    }
   }
   return std::nullopt;
 }
@@ -208,9 +203,10 @@ static bool rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
   // before: test the induction variable and pass everything on.
   Block *newBefore = newLoop.getBeforeBody();
   rewriter.setInsertionPointToStart(newBefore);
+  Value iv = newBefore->getArgument(dw.iv);
   Value test = arith::CmpIOp::create(rewriter, dw.cmp.getLoc(),
-                                     arith::CmpIPredicate::slt,
-                                     newBefore->getArgument(dw.iv), dw.ub);
+                                     dw.cmp.getPredicate(),
+                                     dw.left ? iv : dw.ub, dw.left ? dw.ub : iv);
   scf::ConditionOp::create(rewriter, cond.getLoc(), test,
                            newBefore->getArguments());
 

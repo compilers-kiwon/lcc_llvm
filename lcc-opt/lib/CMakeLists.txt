@@ -34,7 +34,6 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRReconcileUnrealizedCasts
   MLIRSCFDialect
   MLIRSCFToControlFlow
-  MLIRSCFTransforms
   MLIRTransformUtils
   MLIRTransforms
   MLIRUBDialect

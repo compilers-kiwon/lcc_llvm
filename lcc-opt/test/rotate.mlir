@@ -3,8 +3,8 @@
 // RUN: lcc-opt --lcc-rotate-do-while %s | FileCheck %s
 //
 // lcc-rotate-do-while moves the body of a do-while shaped scf.while into
-// the after region when the first test folds to true, and leaves every
-// other loop alone.
+// the after region when the first test folds to true, whatever the
+// predicate and the update, and leaves every other loop alone.
 
 func.func private @sink(i32)
 func.func private @sink64(i64)
@@ -208,7 +208,8 @@ llvm.func @in_llvm_func() -> i32 {
   llvm.return %r : i32
 }
 
-// The loops below stay as they are: the body stays in the before region.
+// The loops below stay as they are, with the body in the before region,
+// except those marked rotated: any predicate and any update of i rotate.
 
 // The bound is an argument: the first test cannot be shown true.  This is
 // also what a C do-while loop looks like, whose body runs at least once.
@@ -268,9 +269,13 @@ func.func @init_arg(%x: i32) -> i32 {
   return %r : i32
 }
 
-// i <= 16
+// Rotated: i <= 16.
 // CHECK-LABEL: func.func @sle(
 //       CHECK:   scf.while
+//  CHECK-NEXT:     arith.cmpi sle, %{{.*}}, %{{.*}} : i32
+//  CHECK-NEXT:     scf.condition
+//  CHECK-NEXT:   } do {
+//  CHECK-NEXT:   ^bb0(
 //  CHECK-NEXT:     func.call @sink
 func.func @sle() -> i32 {
   %c0 = arith.constant 0 : i32
@@ -288,9 +293,13 @@ func.func @sle() -> i32 {
   return %r : i32
 }
 
-// i != 16
+// Rotated: i != 16.
 // CHECK-LABEL: func.func @ne(
 //       CHECK:   scf.while
+//  CHECK-NEXT:     arith.cmpi ne, %{{.*}}, %{{.*}} : i32
+//  CHECK-NEXT:     scf.condition
+//  CHECK-NEXT:   } do {
+//  CHECK-NEXT:   ^bb0(
 //  CHECK-NEXT:     func.call @sink
 func.func @ne() -> i32 {
   %c0 = arith.constant 0 : i32
@@ -308,9 +317,13 @@ func.func @ne() -> i32 {
   return %r : i32
 }
 
-// unsigned i < 16
+// Rotated: unsigned i < 16.
 // CHECK-LABEL: func.func @ult(
 //       CHECK:   scf.while
+//  CHECK-NEXT:     arith.cmpi ult, %{{.*}}, %{{.*}} : i32
+//  CHECK-NEXT:     scf.condition
+//  CHECK-NEXT:   } do {
+//  CHECK-NEXT:   ^bb0(
 //  CHECK-NEXT:     func.call @sink
 func.func @ult() -> i32 {
   %c0 = arith.constant 0 : i32
@@ -328,7 +341,7 @@ func.func @ult() -> i32 {
   return %r : i32
 }
 
-// The after region changes the value it passes on.
+// Stays: the after region changes the value it passes on.
 // CHECK-LABEL: func.func @after_changes(
 //       CHECK:   scf.while
 //  CHECK-NEXT:     func.call @sink
@@ -349,9 +362,13 @@ func.func @after_changes() -> i32 {
   return %r : i32
 }
 
-// The step is an argument.
+// Rotated: the step is an argument; the test is the same.
 // CHECK-LABEL: func.func @step_arg(
 //       CHECK:   scf.while
+//  CHECK-NEXT:     arith.cmpi slt, %{{.*}}, %{{.*}} : i32
+//  CHECK-NEXT:     scf.condition
+//  CHECK-NEXT:   } do {
+//  CHECK-NEXT:   ^bb0(
 //  CHECK-NEXT:     func.call @sink
 func.func @step_arg(%s: i32) -> i32 {
   %c0 = arith.constant 0 : i32
@@ -368,9 +385,13 @@ func.func @step_arg(%s: i32) -> i32 {
   return %r : i32
 }
 
-// The step is negative.
+// Rotated: the step is negative; the test is the same.
 // CHECK-LABEL: func.func @step_negative(
 //       CHECK:   scf.while
+//  CHECK-NEXT:     arith.cmpi slt, %{{.*}}, %{{.*}} : i32
+//  CHECK-NEXT:     scf.condition
+//  CHECK-NEXT:   } do {
+//  CHECK-NEXT:   ^bb0(
 //  CHECK-NEXT:     func.call @sink
 func.func @step_negative() -> i32 {
   %c0 = arith.constant 0 : i32
@@ -409,7 +430,29 @@ func.func @last_tensor() -> (i32, tensor<2xi32>) {
   return %r#0, %r#1 : i32, tensor<2xi32>
 }
 
-// The value tested is not the one passed on to i.
+// Rotated: the bound on the left, 16 > i.
+// CHECK-LABEL: func.func @ub_left(
+//       CHECK:   %[[C16:.*]] = arith.constant 16 : i32
+//       CHECK:   scf.while (%[[I:.*]] = %{{.*}}) : (i32) -> i32 {
+//  CHECK-NEXT:     arith.cmpi sgt, %[[C16]], %[[I]] : i32
+//  CHECK-NEXT:     scf.condition
+func.func @ub_left() -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  %c16 = arith.constant 16 : i32
+  %r = scf.while (%i = %c0) : (i32) -> i32 {
+    func.call @sink(%i) : (i32) -> ()
+    %n = arith.addi %i, %c1 : i32
+    %c = arith.cmpi sgt, %c16, %n : i32
+    scf.condition(%c) %n : i32
+  } do {
+  ^bb0(%a: i32):
+    scf.yield %a : i32
+  }
+  return %r : i32
+}
+
+// Stays: the value tested is not the one passed on to i.
 // CHECK-LABEL: func.func @other_value(
 //       CHECK:   scf.while
 //  CHECK-NEXT:     func.call @sink

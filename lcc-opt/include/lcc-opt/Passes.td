@@ -171,30 +171,29 @@ def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
     }
     ```
 
-    which scf-uplift-while-to-for (lcc-uplift-while) can turn into scf.for.
-    A loop is rotated only when all of these hold, and is left alone
-    otherwise:
+    which lcc-uplift-while can turn into scf.for.  A loop is rotated only
+    when all of these hold, and is left alone otherwise:
 
     - the `after` region has nothing but an scf.yield of its block
       arguments;
-    - the condition is `arith.cmpi slt (arith.addi %iv, %step), %ub`, where
-      %iv is a `before` block argument, %step a positive integer constant
-      and %ub a value, both defined outside the loop;
-    - that addi is the value passed on to the position of %iv;
-    - the first test `%init < %ub` folds to true on constants, so that the
-      body of the do-while loop, which always runs once, runs once in the
-      while loop too.
+    - the condition is an arith.cmpi of any predicate between a value
+      passed on to a `before` block argument %iv and a bound %ub defined
+      outside the loop, either way round;
+    - the first test, the predicate on the initial value of %iv and %ub,
+      folds to true on constants, so that the body of the do-while loop,
+      which always runs once, runs once in the while loop too.
 
-    The later tests compare the very value the do-while loop compared, so
-    the loops run their bodies equally often.  A condition argument that
-    the `after` region does not pass on (a value of the last iteration used
-    after the loop) becomes, when it is defined outside the loop or by pure
-    operations of operands outside the loop, that value, after moving the
-    operations in front of the loop; otherwise it becomes one more
-    loop-carried value starting from a zero (arith.constant, or
-    llvm.mlir.zero for pointers and other LLVM types), which is never read
-    because the body runs at least once.  A loop that would need a zero of
-    another type is left alone.
+    The later tests compare the very values the do-while loop compared, so
+    the loops run their bodies equally often, whatever the predicate and
+    the update of %iv are.  A condition argument that the `after` region
+    does not pass on (a value of the last iteration used after the loop)
+    becomes, when it is defined outside the loop or by pure operations of
+    operands outside the loop, that value, after moving the operations in
+    front of the loop; otherwise it becomes one more loop-carried value
+    starting from a zero (arith.constant, or llvm.mlir.zero for pointers
+    and other LLVM types), which is never read because the body runs at
+    least once.  A loop that would need a zero of another type is left
+    alone.
   }];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
@@ -204,23 +203,38 @@ def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
 }
 
 def LccUpliftWhile : Pass<"lcc-uplift-while"> {
-  let summary = "Uplift while shaped scf.while loops to scf.for";
+  let summary = "Uplift counting while shaped scf.while loops to scf.for";
   let description = [{
-    Applies scf::upliftWhileToForLoop, the transformation of the upstream
-    populateUpliftWhileToForPatterns, greedily, with two changes:
+    A while shaped scf.while, whose `before` region is one arith.cmpi
+    between a `before` block argument %iv and a bound defined outside the
+    loop and an scf.condition passing on every `before` block argument,
+    and whose `after` region yields `%iv + s` or `%iv - s` for %iv, with s
+    a constant, counts %iv.  This pass makes such a loop an scf.for when it
+    can show, on constants, that %iv does not wrap: scf.for leaves a loop
+    undefined whose final induction variable does not fit, while the
+    scf.while just wraps.  It does not rely on C's signed overflow being
+    undefined.
 
-    - The step must be a positive integer constant.  The upstream pattern
-      takes any step defined outside the loop, but scf.for requires a
-      strictly positive step, and a while loop with a zero or negative step
-      means something else.
-    - The final value of the induction variable is computed correctly.
-      The upstream pattern replaces the loop result of the induction
-      variable by `lb + ((ub - lb + step - 1) / step - 1) * step`, the value
-      of the last iteration, while the scf.while result is the value that
-      failed the test, one step further, or lb when the loop does not run.
-      When that result is used, this pass replaces it by a constant when
-      lb, ub and step are constants, and otherwise by one more loop-carried
-      value of the scf.for that starts at lb and takes `iv + step`.
+    - Counting up, the loops `%iv < %ub` (slt, ult) with s = 1 or, with
+      s > 1, a constant %ub with %ub + s - 1 that fits; `%iv <= %ub` (sle,
+      ule) with a constant %ub, as `%iv < %ub + 1`, under the same
+      condition; and `%iv != %ub` (ne) with s = 1 and constant %init <= %ub,
+      signed or unsigned, or %ub the largest value of its type.  They become `scf.for [unsigned] %iv = %init to
+      %end step s`.
+    - Counting down, the loops `%iv > %lb` (sgt, ugt) with s = 1 or, with
+      s > 1, a constant %lb with %lb - s + 1 that does not wrap; `%iv >= %lb`
+      (sge, uge) with a constant %lb, as `%iv > %lb - 1`, likewise; and
+      `%iv != %lb` with s = 1 and constant %init >= %lb, or %lb the
+      smallest value (`%u != 0`).  They become
+      `scf.for unsigned %k = 0 to %n step 1` with %iv = %init - %k * s and
+      the trip count %n = (%init - %end - 1) / s + 1, or 0.
+
+    The final %iv, a result of the scf.while, becomes %init + %n * s
+    (counting up, with %n = (%end - %init - 1) / s + 1 or 0) or %init - %n *
+    s, computed in unsigned arithmetic of the width of %iv, exact because
+    the result fits.  The upstream populateUpliftWhileToForPatterns does
+    only `slt`/`sgt` counting up, takes any step, also one that may be zero
+    or negative at run time, and gives the final %iv one step short.
   }];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
