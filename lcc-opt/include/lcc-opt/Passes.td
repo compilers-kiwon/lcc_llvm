@@ -269,6 +269,65 @@ def LccIndexLoops : Pass<"lcc-index-loops"> {
   ];
 }
 
+def LccGlobalsToMemref : Pass<"lcc-globals-to-memref", "mlir::ModuleOp"> {
+  let summary = "Turn lcc's global arrays into memref.global";
+  let description = [{
+    lcc gives every global variable an `llvm.mlir.global` of
+    `!llvm.array<N x i8>` (or a packed structure of byte arrays when the
+    initializer has zero runs) and reaches its elements through
+    `llvm.mlir.addressof`, `llvm.getelementptr` of i8 at byte offsets and
+    `llvm.load`/`llvm.store`.  This pass replaces such a global with a 1-D
+    `memref.global` of `memref<(N / sizeof(T)) x T>`, where T is the type of
+    every load and store of it, and those loads and stores with
+    `memref.load` and `memref.store` at element indices.
+
+    A global is changed only when all of these hold, and left alone
+    otherwise:
+
+    - it is an array of bytes as above, not a scalar variable (which lcc
+      gives its own type) or an array of pointers, and N is not 0;
+    - it is defined or declared with external or internal linkage (lcc's
+      string literals and the initializers of local arrays are private),
+      in address space 0, without a section, comdat, thread_local or other
+      visibility;
+    - its name is used only by `llvm.mlir.addressof` in function bodies,
+      not in the initializer of a global (nor in its own);
+    - it has loads or stores, all of the same type T, an integer of 8, 16,
+      32 or 64 bits, f32 or f64, and N is a multiple of sizeof(T);
+    - the initializer is `llvm.mlir.zero` (dense<0>), or bytes and zeros
+      with no address (a string, or lcc's packed structures, nested for
+      long initializers), unpacked little-endian into T, for f32 and f64
+      the bits as they are (-0.0, NaN payloads and signs, infinities,
+      subnormals); or there is none (a declaration).  A big-endian data
+      layout leaves the global alone unless it is zero or a declaration.
+
+    External linkage becomes public, internal private (the memref lowering
+    gives private linkage); constant and alignment stay.  A load or store
+    becomes a memref access when it is not volatile, not atomic and has no
+    other attribute than an alignment of at least sizeof(T), and its
+    address is the global's plus a sum of byte offsets, which
+    LinearAnalysis shows to be `c0 + sum of c_k * x_k` exactly in the
+    pointer's index width with c0 and every c_k a multiple of sizeof(T);
+    the index is `c0 / sizeof(T) + sum of (c_k / sizeof(T)) * x_k` in index
+    arithmetic.  Every other use of the global's address (a volatile access,
+    a call argument, a stored address, an offset that may wrap) takes a
+    pointer made from the memref: `memref.extract_aligned_pointer_as_index`,
+    `arith.index_cast` and `llvm.inttoptr`.
+
+    With `remarks`, it reports each global, changed or not, and why, as a
+    remark.
+  }];
+  let options = [
+    Option<"remarks", "remarks", "bool", "false",
+      "Report each global as a remark">,
+  ];
+  let dependentDialects = [
+    "mlir::arith::ArithDialect",
+    "mlir::LLVM::LLVMDialect",
+    "mlir::memref::MemRefDialect",
+  ];
+}
+
 def LccScfToAffine : Pass<"lcc-scf-to-affine"> {
   let summary = "Raise index scf.for loop nests on memrefs to affine.for";
   let description = [{

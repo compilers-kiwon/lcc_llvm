@@ -2,6 +2,7 @@
 
 add_mlir_library(LccOptPasses
   CheckText.cpp
+  GlobalsToMemref.cpp
   IndexLoops.cpp
   InlinePrep.cpp
   LiftLLVMFunc.cpp
