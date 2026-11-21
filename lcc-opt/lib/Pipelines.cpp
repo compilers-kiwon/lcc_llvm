@@ -25,14 +25,18 @@ namespace lcc {
 using namespace mlir;
 
 void lcc::buildPreparePipeline(OpPassManager &pm) {
+  pm.addPass(createLccMemcpyIntrinsic());
   pm.addPass(createMem2Reg());
   pm.addPass(createSROA());
+  pm.addPass(createMem2Reg());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createLccByvalCopy());
   pm.addPass(createInlinerPass());
   pm.addPass(createLccHoistAllocas());
+  pm.addPass(createLccSplitAggregates());
   pm.addPass(createMem2Reg());
   pm.addPass(createSROA());
+  pm.addPass(createMem2Reg());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
 }
@@ -65,9 +69,10 @@ void lcc::registerLccOptPasses() {
   registerLccPasses();
   PassPipelineRegistration<>(
       "lcc-prepare",
-      "Promote lcc's allocas to SSA values and inline calls (mem2reg, sroa, "
-      "canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, "
-      "sroa, canonicalize, cse)",
+      "Promote lcc's allocas to SSA values and inline calls "
+      "(lcc-memcpy-intrinsic, mem2reg, sroa, mem2reg, canonicalize, "
+      "lcc-byval-copy, inline, lcc-hoist-allocas, lcc-split-aggregates, "
+      "mem2reg, sroa, mem2reg, canonicalize, cse)",
       buildPreparePipeline);
   PassPipelineRegistration<>(
       "lcc-to-scf",

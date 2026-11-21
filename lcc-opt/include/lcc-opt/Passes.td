@@ -99,6 +99,41 @@ def LccLiftLLVMFunc : Pass<"lcc-lift-llvm-func"> {
   ];
 }
 
+def LccMemcpyIntrinsic : Pass<"lcc-memcpy-intrinsic"> {
+  let summary = "Turn lcc's memcpy calls into llvm.intr.memcpy";
+  let description = [{
+    lcc copies structures with llvm.call_intrinsic "llvm.memcpy.p0.p0.i64"
+    (or .i32), as the llvm.intr.memcpy of MLIR 21 took no alignments.
+    mem2reg and sroa take the pointers of such a call for escaping, but
+    know llvm.intr.memcpy, which in MLIR 23 keeps the alignments in its
+    arg_attrs.  This pass replaces each such call whose volatile operand is
+    a constant by an llvm.intr.memcpy with the same operands, volatility
+    and argument attributes.
+  }];
+  let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
+def LccSplitAggregates : Pass<"lcc-split-aggregates"> {
+  let summary = "Split lcc's byte array allocas into scalar allocas";
+  let description = [{
+    lcc gives a local structure or array an
+    `llvm.alloca 1 x !llvm.array<N x i8>` and reaches its members through
+    `llvm.getelementptr ... i8` with scalar loads and stores, which cross
+    the byte elements that sroa splits along.  This pass splits such an
+    alloca into one scalar alloca per member that mem2reg can promote, when
+    every use, through getelementptrs of i8 with a constant index, is a
+    non-volatile load or store of an integer, float or pointer, or a
+    non-volatile memcpy of a constant length to or from another pointer;
+    when the loads and stores overlap only at the same offset with the same
+    type; when no memcpy covers part of a member; and when there is at
+    least one load or store.  A memcpy becomes a load and a store per slot
+    of its range, and the bytes of the range no member covers become
+    integer filler slots of at most 8 bytes, so that every byte is still
+    copied.  At most 64 slots.
+  }];
+  let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
 def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
   let summary = "Rotate do-while shaped scf.while loops into while shape";
   let description = [{

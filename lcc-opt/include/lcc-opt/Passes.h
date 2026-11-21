@@ -20,10 +20,13 @@ namespace lcc {
 #define GEN_PASS_DECL
 #include "lcc-opt/Passes.h.inc"
 
-/// Adds the lcc-prepare pipeline to `pm`: mem2reg, sroa, canonicalize,
-/// lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize,
-/// cse.  It turns the allocas lcc gives every local and parameter into SSA
-/// values and inlines calls.  For func.func the inliner neither copies an
+/// Adds the lcc-prepare pipeline to `pm`: lcc-memcpy-intrinsic, mem2reg,
+/// sroa, mem2reg, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas,
+/// lcc-split-aggregates, mem2reg, sroa, mem2reg, canonicalize, cse.  It
+/// turns the allocas lcc gives every local and parameter into SSA values and
+/// inlines calls.  sroa splits allocas that only a following mem2reg
+/// promotes; lcc-memcpy-intrinsic and lcc-split-aggregates let mem2reg and
+/// sroa see lcc's structure copies and members.  For func.func the inliner neither copies an
 /// llvm.byval argument nor moves the allocas of the callee out of the block
 /// of the call, often a loop body, where they would take stack in every
 /// iteration and mem2reg would not promote them; lcc-byval-copy and

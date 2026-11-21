@@ -43,7 +43,8 @@ ninja -C build-lcc-opt check-lcc-opt
 `to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`,
 `uplift.mlir`은 손으로 쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를, `lower.mlir`은 `lcc-lower`가
 `scf`·`ub`·arith·cf·func를 남기지 않는 것을, `text.mlir`은 텍스트 출력 검사와 bytecode가 값을 지키는 것을,
-`llvm-func.mlir`은 `llvm.func`의 루프(가변 인자 함수, 무한 루프)를 올리는 것을 본다.
+`llvm-func.mlir`은 `llvm.func`의 루프(가변 인자 함수, 무한 루프)를 올리는 것을, `memcpy.mlir`·`split.mlir`은
+구조체 복사와 멤버를 SSA 값으로 올리는 것을 본다.
 
 ## 사용
 
@@ -76,7 +77,7 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 
 | 이름 | 패스 | 하는 일 |
 | :- | :- | :- |
-| `lcc-prepare` | mem2reg, sroa, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
+| `lcc-prepare` | lcc-memcpy-intrinsic, mem2reg, sroa, mem2reg, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, lcc-split-aggregates, mem2reg, sroa, mem2reg, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
 | `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, lcc-lift-llvm-func, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
 | `lcc-lower` | convert-scf-to-cf, convert-ub-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts | `lcc-to-scf`의 출력을 `mlir-translate`가 받는 LLVM 방언으로 내린다 |
 
@@ -85,14 +86,37 @@ MLIR의 인라이너는 인자 처리를 callee의 방언에, 인라인한 블�
 진입 블록으로 옮기지만, lcc가 대부분의 함수에 쓰는 `func.func`·`func.call`에는 func 방언이 둘 다 하지 않는다.
 그대로 인라인하면 구조체를 값으로 받는 함수가 caller의 구조체를 고치고, 루프 안에서 인라인된 함수의 지역 배열은
 반복마다 스택을 더 쓴다(256바이트 지역 배열을 쓰는 함수를 1000만 번 부르는 루프가 세그폴트를 냈다). 그래서
-inline 앞뒤에 `lcc-byval-copy`와 `lcc-hoist-allocas`를 둔다([패스](#패스)). 모든 alloca가 없어지지는 않는다.
-`tst/*.c`에서는 배열·구조체 지역 변수 등의 alloca가 남았다.
+inline 앞뒤에 `lcc-byval-copy`와 `lcc-hoist-allocas`를 둔다([패스](#패스)).
+
+lcc는 구조체 복사를 `llvm.call_intrinsic "llvm.memcpy…"`로, 구조체·배열 지역 변수를 `!llvm.array<N x i8>`로 낸다.
+sroa·mem2reg는 앞의 것을 주소가 빠져나가는 호출로 보고, 뒤의 것은 원소인 바이트를 가로지르는 load·store 때문에
+나누지 못한다. 그래서 `lcc-memcpy-intrinsic`과 `lcc-split-aggregates`를 두고, sroa가 나눈 alloca를 올리도록 sroa
+뒤마다 mem2reg를 한 번 더 둔다. 시험 묶음의 lcc 출력 854개 파일에서 `lcc-prepare` 뒤 남는 alloca는 2143개에서
+1247개로 줄었다. 남은 것은 같은 바이트를 다른 형으로 읽고 쓰는 것 475개(레지스터로 받은 구조체 인자를 `i64` 등으로
+통째 저장하고 필드로 읽는 ABI 강제 변환, 공용체), 주소가 빠져나가는 것 439개(호출 인자, 포인터 비교에 쓰는
+`ptrtoint`, 저장, 블록 인자 등), 가변 첨자 배열 150개, 구조체형 값을 읽고 쓰는 ABI 코드 97개, `va_list` 72개,
+volatile 6개, 그 밖 8개(64자리가 넘는 큰 배열 등)다. 앞의 것은 정수 조각으로 나누면 올릴 수 있지만 아직 하지 않는다.
 
 `lcc-to-scf`에서 `lift-cf-to-scf`는 루프 본문을 `before` 영역의 `scf.if` 안에 두는데, 뒤의 canonicalize(MLIR 23의
 `WhileMoveIfDown`)가 그것을 `after` 영역으로 내린다. MLIR 21에는 이 패턴이 없다. 업스트림 `lift-cf-to-scf`는
 `func.func`만 올리므로, lcc가 가변 인자 함수 등에 쓰는 `llvm.func`는 `lcc-lift-llvm-func`가 올린다.
 
 ## 패스
+
+### `lcc-memcpy-intrinsic`
+
+lcc의 `llvm.call_intrinsic "llvm.memcpy.p0.p0.i64"`(32비트 타깃은 `.i32`)를, volatile 인자가 상수이면 같은 피연산자·
+volatile·정렬(`arg_attrs`)의 `llvm.intr.memcpy`로 바꾼다. lcc가 `call_intrinsic`을 쓴 것은 MLIR 21의
+`llvm.intr.memcpy`에 정렬을 줄 수 없었기 때문이다.
+
+### `lcc-split-aggregates`
+
+`llvm.alloca 1 x !llvm.array<N x i8>`의 쓰임이 모두 상수 첨자 `getelementptr … i8`을 거친 정수·실수·포인터의
+non-volatile load·store이거나, 다른 포인터와의 상수 길이 non-volatile `llvm.intr.memcpy`이면, 멤버(오프셋과 형)마다
+스칼라 alloca로 나눈다. load·store끼리는 같은 오프셋·같은 형이 아니면 겹치지 않아야 하고, memcpy가 멤버를 일부만
+덮으면 안 되며, load·store가 하나는 있어야 한다. memcpy는 범위 안의 자리마다 load와 store로 바뀌고, 멤버가 덮지 않는
+바이트(패딩, 쓰지 않는 멤버)는 8바이트 이하 정수 채움 자리가 되어 모든 바이트가 그대로 복사된다. 자리는 64개까지.
+나눈 alloca는 mem2reg가 올린다.
 
 ### `lcc-byval-copy`
 

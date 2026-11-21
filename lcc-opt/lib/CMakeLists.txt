@@ -4,8 +4,10 @@ add_mlir_library(LccOptPasses
   CheckText.cpp
   InlinePrep.cpp
   LiftLLVMFunc.cpp
+  MemcpyIntrinsic.cpp
   Pipelines.cpp
   RotateDoWhile.cpp
+  SplitAggregates.cpp
   UpliftWhile.cpp
 
   ADDITIONAL_HEADER_DIRS
