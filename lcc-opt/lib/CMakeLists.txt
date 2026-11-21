@@ -7,6 +7,7 @@ add_mlir_library(LccOptPasses
   MemcpyIntrinsic.cpp
   Pipelines.cpp
   RotateDoWhile.cpp
+  ScfToAffine.cpp
   SplitAggregates.cpp
   UpliftWhile.cpp
 
@@ -20,6 +21,7 @@ add_mlir_library(LccOptPasses
   DISABLE_INSTALL
   )
 mlir_target_link_libraries(LccOptPasses PUBLIC
+  MLIRAffineDialect
   MLIRArithDialect
   MLIRArithToLLVM
   MLIRControlFlowDialect
@@ -30,6 +32,7 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRFuncToLLVM
   MLIRFunctionInterfaces
   MLIRLLVMDialect
+  MLIRMemRefDialect
   MLIRPass
   MLIRReconcileUnrealizedCasts
   MLIRSCFDialect

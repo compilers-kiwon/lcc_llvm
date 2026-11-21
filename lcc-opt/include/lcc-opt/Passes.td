@@ -242,4 +242,47 @@ def LccUpliftWhile : Pass<"lcc-uplift-while"> {
   ];
 }
 
+def LccScfToAffine : Pass<"lcc-scf-to-affine"> {
+  let summary = "Raise index scf.for loop nests on memrefs to affine.for";
+  let description = [{
+    This pass makes affine.for of the scf.for loops of a nest, and
+    affine.load and affine.store of its memref accesses, when the whole nest
+    is such that affine analysis, which takes accesses to different memrefs
+    for disjoint and sees no other memory operation, is right about it:
+
+    - every loop is a signed index scf.for with a positive constant step
+      and bounds that are affine in the induction variables of the
+      enclosing loops of the nest and in symbols: constants and values
+      defined outside the nest that are valid affine symbols, or integers
+      of at most the width of index defined at the top level of the
+      function, which the pass casts to index after their definition;
+    - the nest holds only side effect free arith operations, constants,
+      ub.poison, scf.if, inner loops of the nest and memref.load and
+      memref.store of a 1-D memref of a memref.get_global, at an index
+      affine like the bounds (LinearAnalysis), whose range over the ranges
+      of the induction variables, from the bounds, lies in the memref;
+    - it is in a func.func (an affine scope), not an llvm.func.
+
+    So no call, llvm.load, llvm.store, llvm.alloca or other operation with
+    side effects.  The pass tries every scf.for from the outside in and
+    raises the first loop whose nest qualifies, with all its inner loops;
+    inner nests of a loop that does not qualify are tried on their own, but
+    can only qualify when they do not use the induction variables of the
+    outer loops.
+
+    With `remarks`, it reports each loop nest it raises and each loop it
+    tries and leaves, with the reason, as a remark, saying which are in
+    another loop ("inner").
+  }];
+  let options = [
+    Option<"remarks", "remarks", "bool", "false",
+      "Report each loop nest as a remark">,
+  ];
+  let dependentDialects = [
+    "mlir::affine::AffineDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::memref::MemRefDialect",
+  ];
+}
+
 #endif // LCC_OPT_PASSES_TD

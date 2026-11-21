@@ -7,9 +7,15 @@
 #ifndef LCC_OPT_PASSES_H
 #define LCC_OPT_PASSES_H
 
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 
 namespace mlir {
 class OpPassManager;
@@ -19,6 +25,62 @@ namespace lcc {
 
 #define GEN_PASS_DECL
 #include "lcc-opt/Passes.h.inc"
+
+/// A range [min, max] of signed values.
+struct IntRange {
+  int64_t min, max;
+};
+
+/// An integer or index value as `constant + sum of coef * leaf`, exact over
+/// the integers: with every value taken as signed, the value is that sum for
+/// every execution, wraparound included, so nothing relies on an operation
+/// not overflowing.
+struct LinearForm {
+  llvm::SmallVector<std::pair<mlir::Value, int64_t>, 4> terms;
+  int64_t constant = 0;
+  bool isConstant() const { return terms.empty(); }
+};
+
+/// Exact linear forms and ranges of integer (up to 64 bits) and index values,
+/// for lcc-index-loops, lcc-globals-to-memref and lcc-scf-to-affine (defined
+/// in ScfToAffine.cpp).  It looks through arith.addi, subi, muli and shli by
+/// constants, extsi, extui, trunci, index_cast and index_castui, and takes
+/// an operation for a leaf where its result may wrap or the cast may change
+/// the value, as shown by the ranges of the operands.  A leaf has the full
+/// range of its type, but the induction variable of an scf.for (or of an
+/// affine.for with constant bounds) lies in [lower bound, upper bound - 1]
+/// whenever the body runs, and arith.extui, index_castui (from a narrower
+/// type), andi with a non-negative constant and shrui by a positive constant
+/// give non-negative numbers below a power of two or the constant.  The
+/// results are cached: an analysis is for one state of the IR.
+class LinearAnalysis {
+public:
+  explicit LinearAnalysis(unsigned indexWidth) : indexWidth(indexWidth) {}
+
+  /// The form of `v`; `v` itself, with coefficient 1, when nothing better.
+  LinearForm getForm(mlir::Value v);
+  /// A range of every value of `v`, or nothing when it is not an integer of
+  /// at most 64 bits or an index, or the bounds do not fit in int64_t.
+  std::optional<IntRange> getRange(mlir::Value v);
+  std::optional<IntRange> getRange(const LinearForm &form);
+  /// The bit width of an integer or index type, or 0 for any other type
+  /// and for integers of more than 64 bits.
+  unsigned getWidth(mlir::Type type) const;
+
+private:
+  LinearForm computeForm(mlir::Value v);
+  std::optional<IntRange> computeLeafRange(mlir::Value v);
+  std::optional<IntRange> getLeafRange(mlir::Value v);
+
+  unsigned indexWidth;
+  unsigned depth = 0;
+  llvm::DenseMap<mlir::Value, LinearForm> forms;
+  llvm::DenseMap<mlir::Value, std::optional<IntRange>> leafRanges;
+};
+
+/// The bit width of `index` in the data layout of `op` (64 without a
+/// data layout specification).
+unsigned getIndexWidth(mlir::Operation *op);
 
 /// Adds the lcc-prepare pipeline to `pm`: lcc-memcpy-intrinsic, mem2reg,
 /// sroa, mem2reg, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas,
