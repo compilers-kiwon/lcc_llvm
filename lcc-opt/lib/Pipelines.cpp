@@ -22,7 +22,9 @@ void lcc::buildPreparePipeline(OpPassManager &pm) {
   pm.addPass(createMem2Reg());
   pm.addPass(createSROA());
   pm.addPass(createCanonicalizerPass());
+  pm.addPass(createLccByvalCopy());
   pm.addPass(createInlinerPass());
+  pm.addPass(createLccHoistAllocas());
   pm.addPass(createMem2Reg());
   pm.addPass(createSROA());
   pm.addPass(createCanonicalizerPass());
@@ -48,7 +50,8 @@ void lcc::registerLccOptPasses() {
   PassPipelineRegistration<>(
       "lcc-prepare",
       "Promote lcc's allocas to SSA values and inline calls (mem2reg, sroa, "
-      "canonicalize, inline, mem2reg, sroa, canonicalize, cse)",
+      "canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, "
+      "sroa, canonicalize, cse)",
       buildPreparePipeline);
   PassPipelineRegistration<>(
       "lcc-to-scf",

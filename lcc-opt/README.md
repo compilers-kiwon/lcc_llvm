@@ -39,8 +39,8 @@ ninja -C build-lcc-opt
 ninja -C build-lcc-opt check-lcc-opt
 ```
 
-`test/*.mlir`을 `/usr/lib/llvm-23/bin`의 `lit`과 `FileCheck`로 돌린다. `prepare.mlir`과 `to-scf.mlir`의 입력은
-lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`과 `uplift.mlir`은 손으로
+`test/*.mlir`을 `/usr/lib/llvm-23/bin`의 `lit`과 `FileCheck`로 돌린다. `prepare.mlir`, `inline.mlir`,
+`to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`과 `uplift.mlir`은 손으로
 쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를 본다.
 
 ## 사용
@@ -69,12 +69,15 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 
 | 이름 | 패스 | 하는 일 |
 | :- | :- | :- |
-| `lcc-prepare` | mem2reg, sroa, canonicalize, inline, mem2reg, sroa, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
+| `lcc-prepare` | mem2reg, sroa, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
 | `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
 
-`lcc-prepare`의 출력은 `mlir-opt --mem2reg --sroa --canonicalize --inline --mem2reg --sroa --canonicalize --cse`와
-같다. inline보다 mem2reg를 먼저 하는 것은, 인라인된 함수의 `llvm.alloca`가 호출이 있던 블록(흔히 루프 본문)에
-들어가는데 mem2reg가 진입 블록 밖의 `llvm.alloca`는 올리지 않기 때문이다. 모든 alloca가 없어지지는 않는다.
+MLIR의 인라이너는 인자 처리를 callee의 방언에, 인라인한 블록의 처리를 호출 연산의 방언에 맡긴다. LLVM 방언은
+`llvm.func`·`llvm.call`이면 `llvm.byval` 인자를 caller 쪽에 복사하고 callee의 상수 크기 `llvm.alloca`를 caller의
+진입 블록으로 옮기지만, lcc가 대부분의 함수에 쓰는 `func.func`·`func.call`에는 func 방언이 둘 다 하지 않는다.
+그대로 인라인하면 구조체를 값으로 받는 함수가 caller의 구조체를 고치고, 루프 안에서 인라인된 함수의 지역 배열은
+반복마다 스택을 더 쓴다(256바이트 지역 배열을 쓰는 함수를 1000만 번 부르는 루프가 세그폴트를 냈다). 그래서
+inline 앞뒤에 `lcc-byval-copy`와 `lcc-hoist-allocas`를 둔다([패스](#패스)). 모든 alloca가 없어지지는 않는다.
 `tst/*.c`에서는 배열·구조체 지역 변수 등의 alloca가 남았다.
 
 `lcc-to-scf`에서 `lift-cf-to-scf`는 루프 본문을 `before` 영역의 `scf.if` 안에 두는데, 뒤의 canonicalize(MLIR 23의
@@ -83,6 +86,21 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 `llvm.func` 안의 `scf.while`에도 동작한다).
 
 ## 패스
+
+### `lcc-byval-copy`
+
+인라이너 앞에서, 본문이 있는 `func.func`의 `llvm.byval` 인자마다 진입 블록에 그 타입의 `llvm.alloca`(정렬은 타입의
+ABI 정렬과 인자의 `llvm.align` 중 큰 것)와 인자에서의 `llvm.intr.memcpy`를 두고 본문이 복사본을 쓰게 한다. byval
+인자는 이미 callee의 복사본이므로 뜻은 같고, 인라인되면 이 복사가 호출마다 caller 쪽에서 일어난다. 인라인되지 않은
+함수에는 복사가 하나 더 남는다. 인자를 쓰는 곳이 그런 memcpy 하나뿐이면 다시 복사하지 않는다.
+
+### `lcc-hoist-allocas`
+
+인라이너 뒤에서, `func.func`·`llvm.func` 본문의 진입 블록이 아닌 블록에 있는 상수 개수 `llvm.alloca`를 진입 블록
+처음으로 옮긴다. lcc는 alloca를 모두 진입 블록에 두므로(시험 묶음의 lcc 출력 854개 파일, alloca 11775개 모두),
+인라이너 뒤 진입 블록 밖의 alloca는 인라인된 함수의 것이다. 옮긴 alloca는 뒤의 mem2reg·sroa가 올릴 수 있다. 안쪽
+영역의 alloca는 다른 할당 범위일 수 있어 두고, LLVM 방언과 달리 lifetime 표시를 넣지 않으므로 옮긴 alloca끼리 스택
+자리를 나눠 쓰지 않는다.
 
 ### `lcc-rotate-do-while`
 

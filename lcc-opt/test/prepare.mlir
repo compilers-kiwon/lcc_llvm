@@ -26,8 +26,9 @@
 //   make -r BUILDDIR=$B HOSTFILE=etc/mlir-x86_64-linux.c rcc lcc cpp headers
 //   LCCDIR=$B $B/lcc -S prepare.c
 //
-// Inlining before the first mem2reg would leave the allocas of sq in the
-// loop body of sumsq, where mem2reg does not promote them.
+// The inlined sq lands in the loop body of sumsq; its allocas, promoted by
+// the first mem2reg or moved to the entry block by lcc-hoist-allocas, are
+// gone.  inline.mlir has allocas that stay.
 
 // CHECK-LABEL: func.func @sq(
 // CHECK:         arith.muli

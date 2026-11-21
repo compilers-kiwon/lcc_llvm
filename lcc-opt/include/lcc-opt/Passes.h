@@ -21,11 +21,14 @@ namespace lcc {
 #include "lcc-opt/Passes.h.inc"
 
 /// Adds the lcc-prepare pipeline to `pm`: mem2reg, sroa, canonicalize,
-/// inline, mem2reg, sroa, canonicalize, cse.  It turns the allocas lcc gives
-/// every local and parameter into SSA values and inlines calls.  The first
-/// mem2reg comes before inline: an inlined callee's allocas land in the
-/// block of the call, often a loop body, and mem2reg does not promote an
-/// llvm.alloca outside the entry block.
+/// lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize,
+/// cse.  It turns the allocas lcc gives every local and parameter into SSA
+/// values and inlines calls.  For func.func the inliner neither copies an
+/// llvm.byval argument nor moves the allocas of the callee out of the block
+/// of the call, often a loop body, where they would take stack in every
+/// iteration and mem2reg would not promote them; lcc-byval-copy and
+/// lcc-hoist-allocas do that.  The first mem2reg, from before these two
+/// passes, promotes the allocas of every function before inlining.
 void buildPreparePipeline(mlir::OpPassManager &pm);
 
 /// Adds the lcc-to-scf pipeline to `pm`: lcc-prepare, lift-cf-to-scf,

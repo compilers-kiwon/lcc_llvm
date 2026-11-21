@@ -9,6 +9,49 @@
 
 include "mlir/Pass/PassBase.td"
 
+def LccByvalCopy : Pass<"lcc-byval-copy"> {
+  let summary = "Copy the llvm.byval arguments of func.func in the callee";
+  let description = [{
+    The inliner leaves the handling of an argument to the dialect of the
+    callee.  The LLVM dialect copies an llvm.byval argument of an llvm.func
+    into an alloca of the caller, so that the callee changes its own copy;
+    the func dialect does not, and an inlined func.func would change the
+    object of the caller.
+
+    This pass, run before the inliner, gives every func.func with a body the
+    copy itself: for each llvm.byval argument it adds to the entry block an
+    llvm.alloca of the llvm.byval type, aligned to the larger of the ABI
+    alignment of that type and the llvm.align of the argument, and an
+    llvm.intr.memcpy from the argument, and lets the body use the copy.  The
+    argument is already the callee's own copy, so a function that is not
+    inlined only copies once more.  An argument whose only use is such a
+    memcpy is left alone.
+  }];
+  let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
+def LccHoistAllocas : Pass<"lcc-hoist-allocas"> {
+  let summary = "Move constant size llvm.alloca into the entry block";
+  let description = [{
+    The inliner leaves the handling of the inlined blocks to the dialect of
+    the call.  For llvm.call the LLVM dialect moves the static allocas of
+    the callee into the entry block of the caller; for func.call the func
+    dialect does not, and an alloca of a function inlined into a loop body
+    takes more stack in every iteration.  mem2reg, too, promotes only the
+    allocas of the entry block.
+
+    This pass, run after the inliner, moves every llvm.alloca of a constant
+    count in a block of a function body other than the entry block, in
+    func.func or llvm.func, to the start of the entry block, with a new
+    llvm.mlir.constant for the count.  lcc puts all its allocas in the entry
+    block, so after the inliner those are the allocas of inlined functions.
+    An alloca in a nested region is left alone, as it may belong to another
+    allocation scope.  Unlike the LLVM dialect it adds no lifetime markers:
+    the moved allocas do not share stack slots.
+  }];
+  let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
 def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
   let summary = "Rotate do-while shaped scf.while loops into while shape";
   let description = [{
