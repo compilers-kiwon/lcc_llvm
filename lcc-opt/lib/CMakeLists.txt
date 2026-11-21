@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 add_mlir_library(LccOptPasses
+  CheckText.cpp
   InlinePrep.cpp
   Pipelines.cpp
   RotateDoWhile.cpp
@@ -18,6 +19,7 @@ add_mlir_library(LccOptPasses
 mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRArithDialect
   MLIRArithToLLVM
+  MLIRControlFlowDialect
   MLIRControlFlowToLLVM
   MLIRControlFlowToSCF
   MLIRDataLayoutInterfaces

@@ -42,7 +42,7 @@ ninja -C build-lcc-opt check-lcc-opt
 `test/*.mlir`을 `/usr/lib/llvm-23/bin`의 `lit`과 `FileCheck`로 돌린다. `prepare.mlir`, `inline.mlir`,
 `to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`,
 `uplift.mlir`은 손으로 쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를, `lower.mlir`은 `lcc-lower`가
-`scf`·`ub`·arith·cf·func를 남기지 않는 것을 본다.
+`scf`·`ub`·arith·cf·func를 남기지 않는 것을, `text.mlir`은 텍스트 출력 검사와 bytecode가 값을 지키는 것을 본다.
 
 ## 사용
 
@@ -53,8 +53,15 @@ build-lcc-opt/bin/lcc-opt --lcc-to-scf foo.mlir
 
 `lcc-to-scf`의 출력은 파이프라인 `lcc-lower`로 LLVM 방언까지 내린다. lcc 드라이버의 `mlir-opt`는 arith·cf·func만
 내리지만 `lcc-to-scf`의 출력에는 `scf`와, `lift-cf-to-scf`가 만든 `ub.poison`이 남을 수 있다. 다른 도구에 넘길 때는
-텍스트가 아니라 bytecode(`--emit-bytecode`)로 넘긴다. MLIR 23의 텍스트 출력은 `f80`·`f128` 상수를 십진수로 줄여 정밀도를 잃고,
-`i64` `cf.switch`의 음수 case(예: `INT64_MIN`)를 다시 읽지 못하는 큰 양수로 쓴다. 패스 없이 읽고 쓰기만 해도 그렇다.
+텍스트가 아니라 bytecode(`--emit-bytecode`)로 넘긴다.
+
+MLIR 23의 텍스트 형식은 두 가지 값을 다시 읽을 때 바꾼다. parser가 십진 실수를 double로 읽으므로 double이 아닌
+`f80`·`f128` 상수(예: `0.1L`)가 double 값이 되고, `cf.switch`의 printer가 case를 부호 없이 쓰므로 `i64`의 음수
+case(예: `INT64_MIN`)는 다시 읽지 못한다(generic 형식은 부호대로 쓴다). 패스 없이 읽고 쓰기만 해도 그렇다. 그래서
+lcc-opt는 텍스트로 쓸 때(`--emit-bytecode`가 없을 때) 파이프라인 끝에 `lcc-check-text`를 돌려, 그런 값이 있으면
+연산마다 오류를 내고 아무것도 쓰지 않는다. `--lcc-allow-lossy-text`를 주면 경고만 내고 쓴다. 시험 묶음의 lcc 출력
+854개 파일에서 이 검사가 잡는 파일은 텍스트로 쓰고 다시 읽으면 달라지는 파일과 같다(lcc 출력 그대로 10개,
+`lcc-to-scf` 뒤 7개).
 
 ```bash
 build-lcc-opt/bin/lcc-opt --lcc-to-scf --lcc-lower --emit-bytecode foo.mlir -o foo.mlirbc
@@ -138,7 +145,7 @@ lcc는 `for (e1; e2; e3) S`를 `e1; goto 시험; L: S; e3; 시험: if (e2) goto 
 
 | 경로 | 내용 |
 | :- | :- |
-| `lcc-opt.cpp` | `main`: 업스트림 등록, 우리 등록, `MlirOptMain` |
+| `lcc-opt.cpp` | `main`: 업스트림 등록, 우리 등록, 텍스트로 쓸 때 `lcc-check-text`를 붙여 `MlirOptMain` |
 | `include/lcc-opt/Passes.h`, `include/lcc-opt/Passes.td`, `lib/` | 우리 패스와 파이프라인(`LccOptPasses`). 패스 선언은 TableGen |
 | `test/` | lit 시험 |
 

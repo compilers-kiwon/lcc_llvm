@@ -9,6 +9,32 @@
 
 include "mlir/Pass/PassBase.td"
 
+def LccCheckText : Pass<"lcc-check-text"> {
+  let summary = "Fail when the text form would change a value";
+  let description = [{
+    The text form of MLIR 23 does not read back to the same IR in two cases
+    that lcc's code meets:
+
+    - a float constant (FloatAttr, or an element of a dense float attribute)
+      of more precision than a double, an f80 or f128 long double, that is
+      not a double: the printer writes a decimal that is exact in the
+      float's own semantics, but the parser reads a decimal literal as a
+      double;
+    - a negative case value of an i64 (or wider) cf.switch: the printer
+      writes the cases unsigned and the parser reads an int64_t.  The
+      generic form (--mlir-print-op-generic) writes them with signs.
+
+    This pass reports each such operation, as an error, and fails, or as a
+    warning when allow-lossy is set.  lcc-opt runs it last whenever it
+    writes text (no --emit-bytecode), with allow-lossy from
+    --lcc-allow-lossy-text; bytecode keeps every value.
+  }];
+  let options = [
+    Option<"allowLossy", "allow-lossy", "bool", "false",
+      "Warn instead of failing">,
+  ];
+}
+
 def LccByvalCopy : Pass<"lcc-byval-copy"> {
   let summary = "Copy the llvm.byval arguments of func.func in the callee";
   let description = [{
