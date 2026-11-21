@@ -6,7 +6,13 @@
 
 #include "lcc-opt/Passes.h"
 
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/ControlFlowToSCF/ControlFlowToSCF.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Conversion/UBToLLVM/UBToLLVM.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/Passes.h"
@@ -45,6 +51,15 @@ void lcc::buildToSCFPipeline(OpPassManager &pm) {
   pm.addPass(createCSEPass());
 }
 
+void lcc::buildLowerPipeline(OpPassManager &pm) {
+  pm.addPass(createSCFToControlFlowPass());
+  pm.addPass(createUBToLLVMConversionPass());
+  pm.addPass(createArithToLLVMConversionPass());
+  pm.addPass(createConvertControlFlowToLLVMPass());
+  pm.addPass(createConvertFuncToLLVMPass());
+  pm.addPass(createReconcileUnrealizedCastsPass());
+}
+
 void lcc::registerLccOptPasses() {
   registerLccPasses();
   PassPipelineRegistration<>(
@@ -60,4 +75,10 @@ void lcc::registerLccOptPasses() {
       "lcc-uplift-while, canonicalize, loop-invariant-code-motion, "
       "canonicalize, cse)",
       buildToSCFPipeline);
+  PassPipelineRegistration<>(
+      "lcc-lower",
+      "Lower the output of lcc-to-scf to the LLVM dialect for mlir-translate "
+      "(convert-scf-to-cf, convert-ub-to-llvm, convert-arith-to-llvm, "
+      "convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts)",
+      buildLowerPipeline);
 }

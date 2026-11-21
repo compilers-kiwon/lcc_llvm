@@ -109,13 +109,15 @@ def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
     after the loop) becomes, when it is defined outside the loop or by pure
     operations of operands outside the loop, that value, after moving the
     operations in front of the loop; otherwise it becomes one more
-    loop-carried value whose initial value is ub.poison, which is never
-    observed because the body runs at least once.
+    loop-carried value starting from a zero (arith.constant, or
+    llvm.mlir.zero for pointers and other LLVM types), which is never read
+    because the body runs at least once.  A loop that would need a zero of
+    another type is left alone.
   }];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
+    "mlir::LLVM::LLVMDialect",
     "mlir::scf::SCFDialect",
-    "mlir::ub::UBDialect",
   ];
 }
 

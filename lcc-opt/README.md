@@ -40,8 +40,9 @@ ninja -C build-lcc-opt check-lcc-opt
 ```
 
 `test/*.mlir`을 `/usr/lib/llvm-23/bin`의 `lit`과 `FileCheck`로 돌린다. `prepare.mlir`, `inline.mlir`,
-`to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`과 `uplift.mlir`은 손으로
-쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를 본다.
+`to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`,
+`uplift.mlir`은 손으로 쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를, `lower.mlir`은 `lcc-lower`가
+`scf`·`ub`·arith·cf·func를 남기지 않는 것을 본다.
 
 ## 사용
 
@@ -50,15 +51,13 @@ LCCDIR=$B $B/lcc -S foo.c                        # mlir/x86_64-linux로 빌드�
 build-lcc-opt/bin/lcc-opt --lcc-to-scf foo.mlir
 ```
 
-`lcc-to-scf`의 출력을 LLVM IR로 내리려면 lcc 드라이버가 쓰는 패스 앞에 `--convert-scf-to-cf`와 `--convert-ub-to-llvm`을
-더한다(`ub.poison`은 `lift-cf-to-scf`와 `lcc-rotate-do-while`이 만들 수 있다). 다른 도구에 넘길 때는 텍스트가 아니라
-bytecode(`--emit-bytecode`)로 넘긴다. MLIR 23의 텍스트 출력은 `f80`·`f128` 상수를 십진수로 줄여 정밀도를 잃고,
+`lcc-to-scf`의 출력은 파이프라인 `lcc-lower`로 LLVM 방언까지 내린다. lcc 드라이버의 `mlir-opt`는 arith·cf·func만
+내리지만 `lcc-to-scf`의 출력에는 `scf`와, `lift-cf-to-scf`가 만든 `ub.poison`이 남을 수 있다. 다른 도구에 넘길 때는
+텍스트가 아니라 bytecode(`--emit-bytecode`)로 넘긴다. MLIR 23의 텍스트 출력은 `f80`·`f128` 상수를 십진수로 줄여 정밀도를 잃고,
 `i64` `cf.switch`의 음수 case(예: `INT64_MIN`)를 다시 읽지 못하는 큰 양수로 쓴다. 패스 없이 읽고 쓰기만 해도 그렇다.
 
 ```bash
-build-lcc-opt/bin/lcc-opt --lcc-to-scf --emit-bytecode foo.mlir -o foo.scf.mlirbc
-mlir-opt --convert-scf-to-cf --convert-ub-to-llvm --convert-arith-to-llvm --convert-cf-to-llvm \
-  --convert-func-to-llvm --reconcile-unrealized-casts --emit-bytecode foo.scf.mlirbc -o foo.mlirbc
+build-lcc-opt/bin/lcc-opt --lcc-to-scf --lcc-lower --emit-bytecode foo.mlir -o foo.mlirbc
 mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 ```
 
@@ -71,6 +70,7 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 | :- | :- | :- |
 | `lcc-prepare` | mem2reg, sroa, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
 | `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
+| `lcc-lower` | convert-scf-to-cf, convert-ub-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts | `lcc-to-scf`의 출력을 `mlir-translate`가 받는 LLVM 방언으로 내린다 |
 
 MLIR의 인라이너는 인자 처리를 callee의 방언에, 인라인한 블록의 처리를 호출 연산의 방언에 맡긴다. LLVM 방언은
 `llvm.func`·`llvm.call`이면 `llvm.byval` 인자를 caller 쪽에 복사하고 callee의 상수 크기 `llvm.alloca`를 caller의
@@ -117,8 +117,9 @@ lcc는 `for (e1; e2; e3) S`를 `e1; goto 시험; L: S; e3; 시험: if (e2) goto 
 
 두 번째부터의 시험은 원래 루프가 비교하던 바로 그 값을 비교하므로 본문이 도는 횟수가 같다. `after` 영역이 넘기지
 않는 조건 인자(마지막 반복의 값을 루프 뒤에서 쓰는 것)는, 루프 밖에서 정의됐거나 루프 밖 값만 쓰는 순수 연산으로
-계산되면 그 연산을 루프 앞으로 옮겨 그 값으로 바꾸고, 그렇지 않으면 초기값이 `ub.poison`인 루프 운반 값을 하나
-더한다. 본문이 적어도 한 번 돌므로 그 초기값은 쓰이지 않는다.
+계산되면 그 연산을 루프 앞으로 옮겨 그 값으로 바꾸고, 그렇지 않으면 초기값이 0(`arith.constant`, 포인터 등은
+`llvm.mlir.zero`)인 루프 운반 값을 하나 더한다. 본문이 적어도 한 번 돌므로 그 초기값은 쓰이지 않는다. 0을 만들 수
+없는 형(텐서 등)이면 바꾸지 않는다.
 
 ### `lcc-uplift-while`
 

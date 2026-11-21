@@ -17,14 +17,19 @@ add_mlir_library(LccOptPasses
   )
 mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRArithDialect
+  MLIRArithToLLVM
+  MLIRControlFlowToLLVM
   MLIRControlFlowToSCF
   MLIRDataLayoutInterfaces
   MLIRFuncDialect
+  MLIRFuncToLLVM
   MLIRFunctionInterfaces
   MLIRLLVMDialect
   MLIRPass
+  MLIRReconcileUnrealizedCasts
   MLIRSCFDialect
+  MLIRSCFToControlFlow
   MLIRSCFTransforms
   MLIRTransforms
-  MLIRUBDialect
+  MLIRUBToLLVM
   )

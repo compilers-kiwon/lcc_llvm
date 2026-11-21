@@ -40,6 +40,14 @@ void buildPreparePipeline(mlir::OpPassManager &pm);
 /// `after` region (WhileMoveIfDown of MLIR 23).
 void buildToSCFPipeline(mlir::OpPassManager &pm);
 
+/// Adds the lcc-lower pipeline to `pm`: convert-scf-to-cf,
+/// convert-ub-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm,
+/// convert-func-to-llvm, reconcile-unrealized-casts.  It lowers the output
+/// of lcc-to-scf to the LLVM dialect for mlir-translate: lcc's driver lowers
+/// only arith, cf and func, but lcc-to-scf leaves scf and, from
+/// lift-cf-to-scf, ub.poison.
+void buildLowerPipeline(mlir::OpPassManager &pm);
+
 /// Registers the passes and pipelines of lcc-opt with the global registry.
 void registerLccOptPasses();
 

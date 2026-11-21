@@ -123,12 +123,12 @@ func.func @hoist(%x: i32) -> (i32, i64) {
 }
 
 // A result the after region does not pass on that changes in every
-// iteration: the new loop carries it, from ub.poison.
+// iteration: the new loop carries it, from a zero that is never read.
 // CHECK-LABEL: func.func @last(
 //  CHECK-SAME:     %[[X:.*]]: i32)
 //       CHECK:   %[[C0:.*]] = arith.constant 0 : i32
 //       CHECK:   %[[C5:.*]] = arith.constant 5 : i32
-//       CHECK:   %[[U:.*]] = ub.poison : i32
+//       CHECK:   %[[U:.*]] = arith.constant 0 : i32
 //       CHECK:   %[[R:.*]]:3 = scf.while (%[[I:.*]] = %[[C0]], %[[S:.*]] = %[[C0]], %[[L:.*]] = %[[U]]) : (i32, i32, i32) -> (i32, i32, i32) {
 //  CHECK-NEXT:     %[[T:.*]] = arith.cmpi slt, %[[I]], %[[C5]] : i32
 //  CHECK-NEXT:     scf.condition(%[[T]]) %[[I]], %[[S]], %[[L]] : i32, i32, i32
@@ -155,6 +155,32 @@ func.func @last(%x: i32) -> (i32, i32, i32) {
     scf.yield %a, %d : i32, i32
   }
   return %r#0, %r#1, %r#2 : i32, i32, i32
+}
+
+// A pointer the after region does not pass on starts from llvm.mlir.zero.
+// CHECK-LABEL: func.func @last_ptr(
+//       CHECK:   %[[Z:.*]] = llvm.mlir.zero : !llvm.ptr
+//       CHECK:   %[[R:.*]]:2 = scf.while (%{{.*}} = %{{.*}}, %{{.*}} = %[[Z]]) : (i32, !llvm.ptr) -> (i32, !llvm.ptr) {
+//  CHECK-NEXT:     arith.cmpi slt
+//       CHECK:   } do {
+//  CHECK-NEXT:   ^bb0(%[[A:.*]]: i32, %{{.*}}: !llvm.ptr):
+//  CHECK-NEXT:     %[[Q:.*]] = llvm.getelementptr %{{.*}}[%[[A]]]
+//       CHECK:     scf.yield %{{.*}}, %[[Q]] : i32, !llvm.ptr
+//       CHECK:   return %[[R]]#0, %[[R]]#1 : i32, !llvm.ptr
+func.func @last_ptr(%p: !llvm.ptr) -> (i32, !llvm.ptr) {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  %c4 = arith.constant 4 : i32
+  %r:2 = scf.while (%i = %c0) : (i32) -> (i32, !llvm.ptr) {
+    %q = llvm.getelementptr %p[%i] : (!llvm.ptr, i32) -> !llvm.ptr, i8
+    %n = arith.addi %i, %c1 : i32
+    %c = arith.cmpi slt, %n, %c4 : i32
+    scf.condition(%c) %n, %q : i32, !llvm.ptr
+  } do {
+  ^bb0(%a: i32, %b: !llvm.ptr):
+    scf.yield %a : i32
+  }
+  return %r#0, %r#1 : i32, !llvm.ptr
 }
 
 // The pass works in llvm.func too.
@@ -360,6 +386,27 @@ func.func @step_negative() -> i32 {
     scf.yield %a : i32
   }
   return %r : i32
+}
+
+// A result the after region does not pass on whose type has no zero the
+// pass can make (a tensor): the loop stays as it is.
+// CHECK-LABEL: func.func @last_tensor(
+//       CHECK:   scf.while
+//  CHECK-NEXT:     tensor.from_elements
+func.func @last_tensor() -> (i32, tensor<2xi32>) {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  %c4 = arith.constant 4 : i32
+  %r:2 = scf.while (%i = %c0) : (i32) -> (i32, tensor<2xi32>) {
+    %t = tensor.from_elements %i, %i : tensor<2xi32>
+    %n = arith.addi %i, %c1 : i32
+    %c = arith.cmpi slt, %n, %c4 : i32
+    scf.condition(%c) %n, %t : i32, tensor<2xi32>
+  } do {
+  ^bb0(%a: i32, %b: tensor<2xi32>):
+    scf.yield %a : i32
+  }
+  return %r#0, %r#1 : i32, tensor<2xi32>
 }
 
 // The value tested is not the one passed on to i.

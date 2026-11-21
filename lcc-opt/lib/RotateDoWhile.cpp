@@ -25,8 +25,9 @@
 #include "lcc-opt/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -140,8 +141,24 @@ static bool collectInvariant(Value v, scf::WhileOp loop,
   return true;
 }
 
-/// Rotates the do-while loop `loop` described by `dw`.
-static void rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
+/// Returns whether zeroValue() can make a value of type `type`.
+static bool hasZero(Type type) {
+  return isa<IntegerType, IndexType, FloatType>(type) ||
+         LLVM::isCompatibleType(type);
+}
+
+/// Returns a zero of type `type`: arith.constant for integers and floats,
+/// llvm.mlir.zero for the other LLVM types (pointers, structs, arrays).
+static Value zeroValue(OpBuilder &builder, Location loc, Type type) {
+  if (isa<IntegerType, IndexType, FloatType>(type))
+    return arith::ConstantOp::create(
+        builder, loc, cast<TypedAttr>(builder.getZeroAttr(type)));
+  return LLVM::ZeroOp::create(builder, loc, type);
+}
+
+/// Rotates the do-while loop `loop` described by `dw`, and returns true, or
+/// returns false and leaves the IR alone.
+static bool rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
   Block *before = loop.getBeforeBody();
   scf::ConditionOp cond = loop.getConditionOp();
   unsigned numArgs = before->getNumArguments();
@@ -158,8 +175,8 @@ static void rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
   // iteration.  When it is defined outside the loop or computed from such
   // values by pure operations, which then compute it in every iteration, it
   // is that value, with the operations moved in front of the loop.
-  // Otherwise the new loop carries it, from ub.poison: the body runs at
-  // least once.
+  // Otherwise the new loop carries it, from a zero that is never read: the
+  // body runs at least once.
   llvm::SetVector<Operation *> hoist;
   SmallVector<Value> invariant(numResults);
   SmallVector<unsigned> carried;
@@ -172,6 +189,9 @@ static void rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
     else
       carried.push_back(i);
   }
+  for (unsigned i : carried)
+    if (!hasZero(cond.getArgs()[i].getType()))
+      return false;
   for (Operation *op : hoist)
     rewriter.moveOpBefore(op, loop);
 
@@ -179,8 +199,7 @@ static void rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
   rewriter.setInsertionPoint(loop);
   SmallVector<Value> inits(loop.getInits());
   for (unsigned i : carried)
-    inits.push_back(
-        ub::PoisonOp::create(rewriter, loc, cond.getArgs()[i].getType()));
+    inits.push_back(zeroValue(rewriter, loc, cond.getArgs()[i].getType()));
   SmallVector<Type> types(ValueRange(inits).getTypes());
   auto newLoop = scf::WhileOp::create(rewriter, loc, types, inits,
                                       /*beforeBuilder=*/nullptr,
@@ -222,6 +241,7 @@ static void rotate(scf::WhileOp loop, DoWhile &dw, RewriterBase &rewriter) {
       results[i] = newLoop.getResult(next++);
   }
   rewriter.replaceOp(loop, results);
+  return true;
 }
 
 namespace {
@@ -236,10 +256,8 @@ struct RotateDoWhilePass
     bool changed = false;
     for (scf::WhileOp loop : loops) {
       std::optional<DoWhile> dw = matchDoWhile(loop);
-      if (!dw)
-        continue;
-      rotate(loop, *dw, rewriter);
-      changed = true;
+      if (dw && rotate(loop, *dw, rewriter))
+        changed = true;
     }
     if (!changed)
       markAllAnalysesPreserved();
