@@ -431,13 +431,18 @@ func.func @"fixed"(%a0: !llvm.ptr) -> i32 {
 //   		y[i] += a * x[i];
 //   }
 //
-// lift-cf-to-scf lifts only func.func, so the loop stays a cf loop.  The
-// allocas are gone: lcc-prepare works on llvm.func too.
+// lift-cf-to-scf lifts only func.func; lcc-lift-llvm-func lifts llvm.func,
+// and the loop becomes the same scf.for as in func.func.
 
 // CHECK-LABEL: llvm.func @axpy(
+//  CHECK-SAME:     %[[N:.*]]: i32, %[[A:.*]]: i32, %[[X:.*]]: !llvm.ptr, %[[Y:.*]]: !llvm.ptr)
 //   CHECK-NOT:   llvm.alloca
-//   CHECK-NOT:   scf.for
-//       CHECK:   cf.cond_br
+//   CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : i32
+//   CHECK-DAG:   %[[C1:.*]] = arith.constant 1 : i32
+//       CHECK:   scf.for %[[I:.*]] = %[[C0]] to %[[N]] step %[[C1]] : i32 {
+//       CHECK:     llvm.store
+//       CHECK:   }
+//   CHECK-NOT:   cf.
 //       CHECK:   llvm.return
 
 module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", llvm.target_triple = "x86_64-pc-linux-gnu"} {

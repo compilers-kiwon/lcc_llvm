@@ -78,6 +78,27 @@ def LccHoistAllocas : Pass<"lcc-hoist-allocas"> {
   let dependentDialects = ["mlir::LLVM::LLVMDialect"];
 }
 
+def LccLiftLLVMFunc : Pass<"lcc-lift-llvm-func"> {
+  let summary = "Lift the control flow of llvm.func to SCF";
+  let description = [{
+    lift-cf-to-scf lifts only func.func, whose statically infinite loops it
+    ends with a func.return; lcc gives variadic functions, functions first
+    called without a prototype and, with -Wf-llvmfunc, all functions as
+    llvm.func.  This pass runs the same transformation,
+    ControlFlowToSCFTransformation, on the body of every llvm.func whose
+    branches are all cf.br, cf.cond_br or cf.switch (lcc's), and ends a
+    statically infinite loop with an llvm.return of a poison value (or of
+    nothing).  A function with other branches is left alone.
+  }];
+  let dependentDialects = [
+    "mlir::arith::ArithDialect",
+    "mlir::cf::ControlFlowDialect",
+    "mlir::LLVM::LLVMDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::ub::UBDialect",
+  ];
+}
+
 def LccRotateDoWhile : Pass<"lcc-rotate-do-while"> {
   let summary = "Rotate do-while shaped scf.while loops into while shape";
   let description = [{

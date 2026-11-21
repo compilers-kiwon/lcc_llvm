@@ -32,9 +32,10 @@ namespace lcc {
 void buildPreparePipeline(mlir::OpPassManager &pm);
 
 /// Adds the lcc-to-scf pipeline to `pm`: lcc-prepare, lift-cf-to-scf,
-/// canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while,
-/// canonicalize, loop-invariant-code-motion, canonicalize, cse.  It turns
-/// the loops of lcc into scf.while and, where it can, scf.for.  The
+/// lcc-lift-llvm-func, canonicalize, cse, lcc-rotate-do-while,
+/// canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion,
+/// canonicalize, cse.  It turns the loops of lcc, in func.func and in
+/// llvm.func, into scf.while and, where it can, scf.for.  The
 /// canonicalize after lift-cf-to-scf moves the loop body, which
 /// lift-cf-to-scf leaves in an scf.if of the `before` region, into the
 /// `after` region (WhileMoveIfDown of MLIR 23).

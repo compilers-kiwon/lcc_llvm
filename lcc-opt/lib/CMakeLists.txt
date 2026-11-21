@@ -3,6 +3,7 @@
 add_mlir_library(LccOptPasses
   CheckText.cpp
   InlinePrep.cpp
+  LiftLLVMFunc.cpp
   Pipelines.cpp
   RotateDoWhile.cpp
   UpliftWhile.cpp
@@ -32,6 +33,8 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRSCFDialect
   MLIRSCFToControlFlow
   MLIRSCFTransforms
+  MLIRTransformUtils
   MLIRTransforms
+  MLIRUBDialect
   MLIRUBToLLVM
   )

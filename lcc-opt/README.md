@@ -42,7 +42,8 @@ ninja -C build-lcc-opt check-lcc-opt
 `test/*.mlir`을 `/usr/lib/llvm-23/bin`의 `lit`과 `FileCheck`로 돌린다. `prepare.mlir`, `inline.mlir`,
 `to-scf.mlir`의 입력은 lcc가 작은 C 함수에서 낸 `.mlir`이고, 만든 명령은 시험 파일의 주석에 있다. `rotate.mlir`,
 `uplift.mlir`은 손으로 쓴 `scf.while`로 각 패스가 바꾸는 경우와 그대로 두어야 하는 경우를, `lower.mlir`은 `lcc-lower`가
-`scf`·`ub`·arith·cf·func를 남기지 않는 것을, `text.mlir`은 텍스트 출력 검사와 bytecode가 값을 지키는 것을 본다.
+`scf`·`ub`·arith·cf·func를 남기지 않는 것을, `text.mlir`은 텍스트 출력 검사와 bytecode가 값을 지키는 것을,
+`llvm-func.mlir`은 `llvm.func`의 루프(가변 인자 함수, 무한 루프)를 올리는 것을 본다.
 
 ## 사용
 
@@ -76,7 +77,7 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 | 이름 | 패스 | 하는 일 |
 | :- | :- | :- |
 | `lcc-prepare` | mem2reg, sroa, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, mem2reg, sroa, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
-| `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
+| `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, lcc-lift-llvm-func, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
 | `lcc-lower` | convert-scf-to-cf, convert-ub-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts | `lcc-to-scf`의 출력을 `mlir-translate`가 받는 LLVM 방언으로 내린다 |
 
 MLIR의 인라이너는 인자 처리를 callee의 방언에, 인라인한 블록의 처리를 호출 연산의 방언에 맡긴다. LLVM 방언은
@@ -89,8 +90,7 @@ inline 앞뒤에 `lcc-byval-copy`와 `lcc-hoist-allocas`를 둔다([패스](#패
 
 `lcc-to-scf`에서 `lift-cf-to-scf`는 루프 본문을 `before` 영역의 `scf.if` 안에 두는데, 뒤의 canonicalize(MLIR 23의
 `WhileMoveIfDown`)가 그것을 `after` 영역으로 내린다. MLIR 21에는 이 패턴이 없다. 업스트림 `lift-cf-to-scf`는
-`func.func`만 올리므로, lcc가 가변 인자 함수 등에 쓰는 `llvm.func`의 루프는 `cf` 그대로 남는다(우리 두 패스는
-`llvm.func` 안의 `scf.while`에도 동작한다).
+`func.func`만 올리므로, lcc가 가변 인자 함수 등에 쓰는 `llvm.func`는 `lcc-lift-llvm-func`가 올린다.
 
 ## 패스
 
@@ -108,6 +108,14 @@ ABI 정렬과 인자의 `llvm.align` 중 큰 것)와 인자에서의 `llvm.intr.
 인라이너 뒤 진입 블록 밖의 alloca는 인라인된 함수의 것이다. 옮긴 alloca는 뒤의 mem2reg·sroa가 올릴 수 있다. 안쪽
 영역의 alloca는 다른 할당 범위일 수 있어 두고, LLVM 방언과 달리 lifetime 표시를 넣지 않으므로 옮긴 alloca끼리 스택
 자리를 나눠 쓰지 않는다.
+
+### `lcc-lift-llvm-func`
+
+업스트림 `lift-cf-to-scf`는 `func.func`만 보고, 출구 없는 무한 루프 뒤에 둘 종결로 `func.return`을 만든다. lcc는 가변
+인자 함수, 원형 없이 먼저 불린 함수, `-Wf-llvmfunc`이면 모든 함수를 `llvm.func`로 낸다. 이 패스는 같은 변환
+(`ControlFlowToSCFTransformation`)을 분기가 모두 `cf.br`·`cf.cond_br`·`cf.switch`(lcc가 쓰는 것)인 `llvm.func` 본문에
+적용하고, 무한 루프 뒤에는 `llvm.return`(값을 돌려주는 함수면 poison 값)을 둔다. 출구 종류가 하나로 남아야 `cf`가
+남지 않는다. 다른 분기(`llvm.br` 등)가 있는 함수는 그대로 둔다.
 
 ### `lcc-rotate-do-while`
 

@@ -40,6 +40,7 @@ void lcc::buildPreparePipeline(OpPassManager &pm) {
 void lcc::buildToSCFPipeline(OpPassManager &pm) {
   buildPreparePipeline(pm);
   pm.addPass(createLiftControlFlowToSCFPass());
+  pm.addPass(createLccLiftLLVMFunc());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
   pm.addPass(createLccRotateDoWhile());
@@ -71,7 +72,8 @@ void lcc::registerLccOptPasses() {
   PassPipelineRegistration<>(
       "lcc-to-scf",
       "Lift lcc's loops to scf.while and scf.for (lcc-prepare, "
-      "lift-cf-to-scf, canonicalize, cse, lcc-rotate-do-while, canonicalize, "
+      "lift-cf-to-scf, lcc-lift-llvm-func, canonicalize, cse, "
+      "lcc-rotate-do-while, canonicalize, "
       "lcc-uplift-while, canonicalize, loop-invariant-code-motion, "
       "canonicalize, cse)",
       buildToSCFPipeline);
