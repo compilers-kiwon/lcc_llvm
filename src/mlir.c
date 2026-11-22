@@ -2198,6 +2198,43 @@ static void I(emit)(Node p) {
 }
 static void I(export)(Symbol p) {}
 
+/* emitpragmas - emit the attributes NS.op and NS.args of pragmas pr,
+   each after sep */
+static void emitpragmas(Pragma pr, char *sep) {
+	Pragmaarg a;
+	int i;
+
+	for ( ; pr; pr = pr->link, sep = ", ") {
+		fprint(module, "%s%s.op = \"%s\", %s.args = {", sep, pr->ns,
+			pr->op, pr->ns);
+		for (a = pr->args; a; a = a->link) {
+			fprint(module, "%s%s = ", a == pr->args ? "" : ", ", a->key);
+			switch (a->kind) {
+			case PIDENT:
+				fprint(module, "@\"%s\"", gname(a->sym));
+				break;
+			case PINT:
+				fprint(module, "%s : i64", a->ints[0]);
+				break;
+			case PLIST:
+				fprint(module, "array<i64");
+				for (i = 0; i < a->n; i++)
+					fprint(module, "%s%s", i ? ", " : ": ", a->ints[i]);
+				fprint(module, ">");
+				break;
+			case PSTRING:
+				putc('"', module);
+				emitbytes((unsigned char *)a->s, a->n);
+				putc('"', module);
+				break;
+			default:
+				assert(0);
+			}
+		}
+		fprint(module, "}");
+	}
+}
+
 /*
  * function - generate code for function f: a func.func, or an llvm.func
  * if it is variadic or -llvmfunc is given.  Its parameters have the
@@ -2213,6 +2250,7 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	struct regs r;
 	struct part rpart, *part;
 	char *v, *w, *plain, *typed, *named;
+	Pragma pr = funcpragmas(f);
 
 	flushglobal();
 	rettype = rettypestr(f->type);
@@ -2266,8 +2304,15 @@ static void I(function)(Symbol f, Symbol caller[], Symbol callee[], int ncalls) 
 	fprint(module, ")");
 	if (restype)
 		fprint(module, " -> %s", resstr(restype, f->type));
-	if (fkind == FUNCFUNC && f->sclass == STATIC)
-		fprint(module, " attributes {llvm.linkage = #llvm.linkage<internal>}");
+	if (fkind == FUNCFUNC && f->sclass == STATIC) {
+		fprint(module, " attributes {llvm.linkage = #llvm.linkage<internal>");
+		emitpragmas(pr, ", ");
+		fprint(module, "}");
+	} else if (pr) {
+		fprint(module, " attributes {");
+		emitpragmas(pr, "");
+		fprint(module, "}");
+	}
 	fprint(module, " {\n");
 
 	if (rettype)
