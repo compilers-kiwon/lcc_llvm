@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 add_mlir_library(LccOptPasses
+  AffineToLinalg.cpp
   CheckText.cpp
   DistinctSuccessors.cpp
   DistributeReductions.cpp
@@ -38,6 +39,7 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRFuncDialect
   MLIRFuncToLLVM
   MLIRFunctionInterfaces
+  MLIRLinalgDialect
   MLIRLLVMDialect
   MLIRMemRefDialect
   MLIRMemRefToLLVM

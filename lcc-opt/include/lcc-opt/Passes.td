@@ -512,4 +512,51 @@ def LccDistributeReductions : Pass<"lcc-distribute-reductions"> {
   ];
 }
 
+def LccAffineToLinalg : Pass<"lcc-affine-to-linalg"> {
+  let summary = "Turn affine loop nests into linalg.generic";
+  let description = [{
+    This pass turns a perfect nest of affine.for loops whose innermost body
+    only loads and stores memrefs at affine indices of the nest's loops and
+    computes with side effect free operations into a linalg.generic on
+    those memrefs, with one iteration dimension for each loop, in the order
+    of the loops, which linalg lowers to the same loops.  A nest becomes a
+    linalg.generic only when all of these hold, and stays otherwise:
+
+    - every loop has constant bounds, at least one iteration and no
+      iter_args, and the bodies of the outer loops hold nothing but side
+      effect free operations and the next loop;
+    - every index is `c + sum of a_k * i_k` of the nest's loop variables i_k
+      with constants a_k >= 0 and c, and lies in the memref (static shape,
+      identity layout);
+    - a memref the nest stores to has one affine.store, at indices that are
+      distinct loop variables plus constants, and the nest reads it only
+      at those indices (the output, read where it accumulates); a load
+      after the store reads the stored value.  Memrefs the nest only reads
+      are inputs, one for each distinct index.  Different memref values of
+      the same memref.get_global or memref.alloca leave the nest alone.
+
+    With iteration dimensions j_k counting the iterations of the loops from
+    0, an index c + a * j_k of a dimension is that of a memref.subview with
+    offset c and stride a, a constant c of one of size 1 and offset c, and
+    another sum one of offset c and the size of its range, so that the
+    dimension j_k of a loop has the size of its iteration count whenever an
+    index is it alone; linalg infers the iteration counts from those, so
+    every loop must have such an index.  The loop variables in the body
+    become `lb + step * linalg.index`.  A dimension is parallel when it is in
+    the indices of every output, and a reduction otherwise.
+
+    With `remarks`, it reports each nest it changes or leaves, and why, as a
+    remark.
+  }];
+  let options = [
+    Option<"remarks", "remarks", "bool", "false",
+      "Report each loop nest as a remark">,
+  ];
+  let dependentDialects = [
+    "mlir::affine::AffineDialect",
+    "mlir::linalg::LinalgDialect",
+    "mlir::memref::MemRefDialect",
+  ];
+}
+
 #endif // LCC_OPT_PASSES_TD
