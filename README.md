@@ -153,6 +153,54 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
     -semihosting-config enable=on,target=native -kernel prog
 ```
 
+## #pragma를 MLIR 함수 속성으로
+
+rcc 옵션 `-pragma=NS`(드라이버에서는 `-Wf-pragma=NS`, 여러 번 줄 수 있음)로 이름 공간 NS를 켜면 함수 본문의
+`#pragma NS OP KEY=VALUE ...`를 읽고 검사한다. mlir 백엔드는 그것을 그 함수의 속성 `NS.op`(문자열)와 `NS.args`(딕셔너리)로 내고,
+llvm 백엔드와 원래 백엔드들은 검사만 하고 출력은 바꾸지 않는다. 연산과 키의 뜻은 lcc가 모르고 MLIR을 받는 도구가 정한다. gcc는
+모르는 pragma를 무시하므로(`-Wno-unknown-pragmas`) 같은 C를 gcc로 돌려 결과를 비교할 수 있다. 옵션이 없으면 전과 같다.
+
+```c
+signed char act0[64][16], act1[64][32];
+static const signed char L1_W[32][16] = { 1 };
+
+static void layer1(void) {
+#pragma knpu conv2d in=act0 w=L1_W out=act1 shape=(1,8,8,16) izp=-3 round="double"
+	int p;
+	...
+}
+```
+
+`lcc -S -Wf-pragma=knpu`가 내는 함수 머리(한 줄)는 다음과 같다.
+
+```mlir
+func.func @"layer1"() attributes {llvm.linkage = #llvm.linkage<internal>, knpu.op = "conv2d", knpu.args = {in = @"act0", w = @"L1_W", out = @"act1", shape = array<i64: 1, 8, 8, 16>, izp = -3 : i64, round = "double"}} {
+```
+
+| VALUE | 쓰는 법 | MLIR |
+| :- | :- | :- |
+| 이름 | 그 자리에서 보이는 파일 수준 객체. static, 임시 정의, extern 선언만 있는 것, 블록 안의 extern 선언도 된다 | `@"이름"`(그 전역의 이름) |
+| 정수 | 10진이나 16진, 앞에 `+`나 `-`. 값이 64비트 부호 있는 정수의 범위 안 | `N : i64` |
+| 정수 목록 | `(1,8,8,16)`, `(5)`, `()` | `array<i64: 1, 8, 8, 16>`, `array<i64>` |
+| 문자열 | C 이스케이프를 푼 바이트 | MLIR 문자열 |
+
+- NS, OP, KEY는 C 식별자이고 C89 키워드가 아니다. `-pragma=ref`는 기존 `#pragma ref`와 겹쳐서 안 된다. 잘못된 `-pragma=`는 rcc가
+  시작할 때 오류로 끝난다. 키는 한 번씩 쓰고, 인자가 없으면 `NS.args = {}`다. NS로 MLIR 방언 이름(`llvm`, `func` 등)은 피한다.
+- 놓는 자리는 함수 본문 가장 바깥 블록의 선언·문장 사이다(여는 `{` 바로 뒤와 닫는 `}` 바로 앞 포함). 한 함수에 이름 공간마다
+  하나다. func.func, static 함수, llvm.func(가변 인자 함수, `-Wf-llvmfunc` 등) 모두에 붙는다.
+- cpp는 `#pragma` 줄의 매크로를 펼치지 않는다. 줄은 `\`로 이을 수 있고 길이 제한은 없다. 다른 `#pragma`(`#pragma ref` 포함)는
+  전과 같다.
+- 가리킨 객체는 `#pragma ref`처럼 쓰인 것으로 센다. 본문에서 쓰지 않는 static 배열도 남고 `-A` 경고가 나지 않으며,
+  symbolic 백엔드가 찍는 ref 수가 는다.
+- 다음은 그 `#pragma` 줄 번호와 함께 오류다.
+  - 함수 본문 밖, 중첩 블록 안, 선언·문장의 중간(루프·if 머리와 본문 사이, 레이블과 문장 사이, if 본문과 else 사이, 식 중간 등)
+  - 한 함수에 같은 이름 공간의 `#pragma`가 둘 이상
+  - OP 없음, 키워드, `=` 없음, 같은 키, 값 없음, 그 밖의 문법 오류
+  - 실수, 8진(`010`), 접미사(`10u`), 문자 상수, 64비트 범위 밖의 정수, 중첩 목록, `L"..."`, 이어 붙인 문자열, 잘못된 이스케이프
+  - 선언되지 않은 이름, 파일 수준 객체가 아닌 이름(지역 변수, 매개변수, 함수 안 static, 함수, typedef 이름, enum 상수)
+- 속성 안에서 이름으로 가리킨 전역은 lcc-opt의 `lcc-globals-to-memref`가 memref로 바꾸지 않아 그 배열을 쓰는 루프가 올라가지
+  않는다([lcc-opt](lcc-opt/README.md#lcc-globals-to-memref)). lcc-opt로 올릴 코드는 속성을 지우거나 옵션 없이 컴파일한다.
+
 ## lcc 4.2와 다른 점
 
 표준이 컴파일러에 맡긴 것은 gcc·clang을 따랐다.
@@ -163,6 +211,7 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
 - 비트 필드를 gcc와 같게 배치한다.
 - cpp가 C99 가변 인자 매크로를 받는다(시스템 헤더 밖에서는 경고). newlib 헤더가 쓴다.
 - 부동소수점 상수의 넘침·아래 넘침 경고가 gcc·clang과 같다.
+- `-Wf-pragma=NS`로 켠 이름 공간의 `#pragma`를 MLIR 함수 속성으로 넘긴다([위 절](#pragma를-mlir-함수-속성으로)).
 
 나머지 변경은 원본의 버그 수정이며 git 이력에 있다. 64비트 호스트에서 드러나는 것, `gcc -O2`로
 빌드할 때 드러나는 것, ASan·UBSan으로 찾은 정의되지 않은 동작, 상수 표의 0.0, 파일 수준 암묵적 선언,
@@ -179,6 +228,7 @@ qemu-system-arm -M mps2-an385 -nographic -monitor none -serial none \
 | `c-testsuite` | [c-testsuite](https://github.com/c-testsuite/c-testsuite)의 C89 시험 | 144 |
 | `torture` | GCC torture 시험(LLVM test-suite 안)의 C89 시험 | 618 |
 | `llvm-bench` | [LLVM test-suite](https://github.com/llvm/llvm-test-suite)의 벤치마크 | 26 |
+| `pragma` | `tst/pragma`. `-Wf-pragma=`의 오류 메시지, 옵션이 없을 때와 같은 IR, 실행 결과, mlir 백엔드의 속성과 MLIR 23의 읽기·bytecode·symbol-dce·`mlir-lint.sh` | 9(llvm), 14(mlir) |
 
 외부 묶음은 이 저장소에 복사하지 않았다. 체크아웃한 위치를 준다. C99 기능을 쓰는 시험은 뺀다.
 
@@ -378,6 +428,7 @@ RISC-V 64에서 `_POSIX_C_SOURCE=200809L`이나 `_XOPEN_SOURCE=700`을 정의하
 | `src/target.h` | 타깃 표(트리플, 데이터 배치, 크기, ABI) |
 | `src/abi.c`, `sysv.c`, `aapcs64.c`, `arm.c`, `riscv.c` | 타깃별 호출 규약 |
 | `src/quad.c` | 소프트웨어 IEEE quad |
+| `src/pragma.c` | `-pragma=NS`로 켠 이름 공간의 `#pragma` |
 | `src/*.c`(그 밖), `cpp/`, `lburg/` | lcc 4.2의 프론트엔드, 전처리기, 원래 백엔드 |
 | `etc/llvm-T.c`, `etc/mlir-T.c` | 타깃별 드라이버 호스트 파일 |
 | `etc/oe-linux.c` | Yocto 툴체인용 드라이버 |
@@ -387,6 +438,7 @@ RISC-V 64에서 `_POSIX_C_SOURCE=200809L`이나 `_XOPEN_SOURCE=700`을 정의하
 | `include/llvm/T/` | 타깃별 자체 헤더 |
 | `tst/` | lcc 자체의 시험(`tst/*.c`, 입력 `.0`) |
 | `tst/llvm/` | 단위 시험 |
+| `tst/pragma/` | `-Wf-pragma=` 시험 |
 | `llvm/T/tst/` | 타깃별 `tst/*.c` 기준 출력 |
 | `meta-lcc/` | Yocto 레이어 |
 | `.github/workflows/`, `.github/scripts/` | CI·릴리스 워크플로와 그 스크립트 |
