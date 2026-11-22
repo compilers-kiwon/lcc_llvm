@@ -1,0 +1,4 @@
+tst/pragma/err-rcc.i:4: missing " in `#pragma knpu'
+tst/pragma/err-rcc.i:5: syntax error in `#pragma knpu' at `/* cpp removes comme'
+tst/pragma/err-rcc.i:6: syntax error in `#pragma knpu' at `@'
+tst/pragma/err-rcc.i:7: missing " in `#pragma knpu'

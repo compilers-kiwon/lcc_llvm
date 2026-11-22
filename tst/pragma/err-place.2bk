@@ -1,0 +1,24 @@
+tst/pragma/err-place.c:13: `#pragma knpu' outside a function body
+tst/pragma/err-place.c:17: `#pragma knpu' outside a function body
+tst/pragma/err-place.c:20: `#pragma knpu' outside a function body
+tst/pragma/err-place.c:27: `#pragma knpu' not between the declarations and statements of the outermost block of `nested'
+tst/pragma/err-place.c:29: `#pragma knpu' not between the declarations and statements of the outermost block of `nested'
+tst/pragma/err-place.c:33: `#pragma knpu' not between the declarations and statements of the outermost block of `nested'
+tst/pragma/err-place.c:42: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:47: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:50: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:54: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:58: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:64: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:67: `#pragma knpu' not between the declarations and statements of the outermost block of `heads'
+tst/pragma/err-place.c:77: `#pragma knpu' not between the declarations and statements of the outermost block of `middles'
+tst/pragma/err-place.c:81: `#pragma knpu' not between the declarations and statements of the outermost block of `middles'
+tst/pragma/err-place.c:84: `#pragma knpu' not between the declarations and statements of the outermost block of `middles'
+tst/pragma/err-place.c:87: `#pragma knpu' not between the declarations and statements of the outermost block of `middles'
+tst/pragma/err-place.c:92: `#pragma knpu' not between the declarations and statements of the outermost block of `middles'
+tst/pragma/err-place.c:99: `#pragma knpu' not between the declarations and statements of the outermost block of `peeks'
+tst/pragma/err-place.c:101: `#pragma knpu' not between the declarations and statements of the outermost block of `peeks'
+tst/pragma/err-place.c:109: more than one `#pragma knpu' in `twice'
+tst/pragma/err-place.c:111: more than one `#pragma npu2' in `twice'
+tst/pragma/err-place.c:118: `#pragma knpu' not between the declarations and statements of the outermost block of `shadow'
+tst/pragma/err-place.c:125: `#pragma knpu' outside a function body

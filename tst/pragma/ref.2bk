@@ -1,0 +1,1 @@
+tst/pragma/ref.c:7: warning: static `array 2 of int unused' is not referenced

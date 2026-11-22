@@ -28,6 +28,18 @@
 #   llvm-bench DIR    DIR/SingleSource/Benchmarks/{Stanford,McGill,Shootout,
 #                     Dhrystone}/*.c of the LLVM test-suite; stdout+stderr and
 #                     "exit N" compared with NAME.reference_output
+#   pragma            tst/pragma with lcc -Wf-pragma=knpu -Wf-pragma=npu2:
+#                     messages of errNAME.c and errNAME.i compared with
+#                     errNAME.2bk, of ref.c with -A -A with ref.2bk (named
+#                     objects are used); attr.c compiled and run, stdout compared
+#                     with attr.1bk, its IR the same as without the options;
+#                     with MLIR, the attributes of attr.c, also with
+#                     -Wf-llvmfunc, and of a generated #pragma longer than
+#                     rcc's buffer compared with attr.abk and what they must
+#                     be, attr.c read by mlir-opt, also as bytecode, and
+#                     lcc-opt if $LCCOPT names it, its names of objects
+#                     defined, also after --symbol-dce, and checked by
+#                     src/mlir-lint.sh; bad -pragma= options must fail
 #
 # Programs of the external suites are used only if they are C89: no GNU
 # keywords, GCC predefined macros or #pragma, also in the files they
@@ -82,7 +94,7 @@ done
 suite=$1
 [ $# -gt 0 ] && shift
 case "$suite" in
-lcc|unit) dir= ;;
+lcc|unit|pragma) dir= ;;
 c-testsuite|torture|llvm-bench)
 	dir=$1
 	if [ -z "$dir" -o ! -d "$dir" ]; then
@@ -364,6 +376,152 @@ execute() {
 	status=$?
 }
 
+# attrs file: the attributes NS.op and NS.args of the functions of the
+# MLIR file, a line "name attributes" for each, without the llvm.linkage
+# of a static func.func
+attrs() {
+	sed -n 's/^[a-z]*\.func \(internal \)\{0,1\}@"\([^"]*\)"(.* attributes {\(.*\.op = .*\)} {$/\2 \3/p' "$1" |
+	sed 's/^\([^ ]*\) llvm\.linkage = #llvm\.linkage<internal>, /\1 /'
+}
+
+# tollvm base: base.ll from base.mlir, as the driver lowers it
+tollvm() {
+	$MLIRBIN/mlir-opt --convert-arith-to-llvm --convert-cf-to-llvm \
+		--convert-func-to-llvm --reconcile-unrealized-casts \
+		--emit-bytecode $1.mlir -o $1.mlirbc &&
+	$MLIRBIN/mlir-translate --mlir-to-llvmir $1.mlirbc -o $1.ll
+}
+
+# isattrs name file: report whether file is the attributes $T/name.abk
+isattrs() {
+	if cmp -s $2 $T/$1.abk; then report PASS $1
+	else report FAIL $1 "attributes differ from $2"; fi
+}
+
+# pragmattr: tst/pragma/attr.c, which lcc must compile without messages
+pragmattr() {
+	src=tst/pragma/attr.c
+	rm -f $T/attr.ll $T/attr.mlir $T/attr-off.ll $T/attr-off.mlir
+	if ! timeout 300 $LCC $P -S -o $T/attr.ll $src >$T/attr.cerr 2>&1 ||
+	   [ -s $T/attr.cerr ]; then
+		report CFAIL attr "`head -1 $T/attr.cerr`"
+		return
+	fi
+	timeout 300 $LCC -S -o $T/attr-off.ll $src >$T/attr-off.cerr 2>&1
+	case "`sed -n '/^!/!{p;q;}' $T/attr.ll`" in
+	module*)
+		mv $T/attr.ll $T/attr.mlir
+		mv $T/attr-off.ll $T/attr-off.mlir
+		attrs $T/attr.mlir >$T/attr.abk
+		isattrs attr tst/pragma/attr.abk
+		timeout 300 $LCC $P -Wf-llvmfunc -S -o $T/attr-llvmfunc.mlir $src \
+			>$T/attr-llvmfunc.cerr 2>&1
+		attrs $T/attr-llvmfunc.mlir >$T/attr-llvmfunc.abk
+		isattrs attr-llvmfunc tst/pragma/attr.abk
+		if ! $MLIRBIN/mlir-opt $T/attr.mlir -o $T/attr-opt.mlir >$T/attr-opt.err 2>&1; then
+			report FAIL attr-mlir-opt "`head -1 $T/attr-opt.err`"
+		elif $MLIRBIN/mlir-opt --emit-bytecode $T/attr.mlir -o $T/attr.mlirbc &&
+		     $MLIRBIN/mlir-opt $T/attr.mlirbc -o $T/attr-bc.mlir &&
+		     cmp -s $T/attr-opt.mlir $T/attr-bc.mlir; then
+			report PASS attr-mlir-opt
+		else
+			report FAIL attr-mlir-opt "not the same through bytecode"
+		fi
+		if [ -n "$LCCOPT" ]; then
+			if $LCCOPT $T/attr.mlir -o $T/attr-lccopt.mlir >$T/attr-lccopt.err 2>&1 &&
+			   [ "`grep -c '\.op = ' $T/attr-lccopt.mlir`" = "`grep -c '\.op = ' $T/attr-opt.mlir`" ]; then
+				report PASS attr-lcc-opt
+			else
+				report FAIL attr-lcc-opt "`head -1 $T/attr-lccopt.err`"
+			fi
+		fi
+		# the objects the pragmas name are defined, also after symbol-dce
+		$MLIRBIN/mlir-opt --symbol-dce $T/attr.mlir -o $T/attr-dce.mlir 2>/dev/null
+		why=
+		for name in `sed 's/^[^ ]* //' $T/attr.abk | grep -o '@"[^"]*"' | sed 's/^@"//; s/"$//' | sort -u`; do
+			grep "^llvm\.mlir\.global [a-z ]*@\"$name\"(" $T/attr.mlir >/dev/null ||
+				why="$why $name"
+			grep "llvm\.mlir\.global [a-z ]*@$name(" $T/attr-dce.mlir >/dev/null ||
+				why="$why $name(symbol-dce)"
+		done
+		[ "`grep -c '\.op = ' $T/attr-dce.mlir`" = "`grep -c '\.op = ' $T/attr-opt.mlir`" ] ||
+			why="$why attributes(symbol-dce)"
+		if [ -z "$why" ]; then report PASS attr-names
+		else report FAIL attr-names "not defined:$why"; fi
+		if src/mlir-lint.sh $T/attr.mlir >$T/attr.lint 2>&1; then report PASS attr-lint
+		else report FAIL attr-lint "`head -1 $T/attr.lint`"; fi
+		# the LLVM IR of the driver is the same as without the options
+		if tollvm $T/attr && tollvm $T/attr-off && cmp -s $T/attr.ll $T/attr-off.ll &&
+		   ! grep '\.op = ' $T/attr-off.mlir >/dev/null; then
+			report PASS attr-ll
+		else
+			report FAIL attr-ll "not the same LLVM IR as without -Wf-pragma"
+		fi ;;
+	*)	if cmp -s $T/attr.ll $T/attr-off.ll; then report PASS attr-ll
+		else report FAIL attr-ll "not the same LLVM IR as without -Wf-pragma"; fi ;;
+	esac
+	if ! timeout 300 $LCC $P -o $T/attr $src $LCCLIBS >$T/attr-run.cerr 2>&1; then
+		report CFAIL attr-run "`head -1 $T/attr-run.cerr`"
+		return
+	fi
+	execute attr /dev/null 60
+	if [ $status = 124 ]; then report TIMEOUT attr-run
+	elif [ $status != 0 ]; then report FAIL attr-run "exit status $status"
+	elif ! cmp -s tst/pragma/attr.1bk $T/attr.out; then
+		report FAIL attr-run "stdout differs from tst/pragma/attr.1bk"
+	else report PASS attr-run; fi
+}
+
+# pragmalong: a #pragma longer than rcc's input buffer
+pragmalong() {
+	awk 'BEGIN {
+		printf "void f(void)\n{\n#pragma knpu longline "
+		for (i = 0; i < 600; i++) printf "k"
+		printf "=-1 big=("
+		for (i = 0; i < 3000; i++) printf "%s%d", i ? "," : "", i
+		printf ") s=\""
+		for (i = 0; i < 5000; i++) printf "x"
+		printf "\\n\"\n}\n"
+	}' >$T/long.c
+	awk 'BEGIN {
+		printf "f knpu.op = \"longline\", knpu.args = {"
+		for (i = 0; i < 600; i++) printf "k"
+		printf " = -1 : i64, big = array<i64: "
+		for (i = 0; i < 3000; i++) printf "%s%d", i ? ", " : "", i
+		printf ">, s = \""
+		for (i = 0; i < 5000; i++) printf "x"
+		printf "\\0A\"}\n"
+	}' >$T/long.ok
+	rm -f $T/long.ll $T/long-off.ll
+	if ! timeout 300 $LCC $P -S -o $T/long.ll $T/long.c >$T/long.cerr 2>&1 ||
+	   [ -s $T/long.cerr ]; then
+		report CFAIL long "`head -1 $T/long.cerr`"
+		return
+	fi
+	case "`sed -n '/^!/!{p;q;}' $T/long.ll`" in
+	module*)
+		attrs $T/long.ll >$T/long.abk
+		isattrs long $T/long.ok ;;
+	*)	timeout 300 $LCC -S -o $T/long-off.ll $T/long.c >/dev/null 2>&1
+		if cmp -s $T/long.ll $T/long-off.ll; then report PASS long
+		else report FAIL long "not the same LLVM IR as without -Wf-pragma"; fi ;;
+	esac
+}
+
+# pragmaoption: rcc rejects -pragma= without a name space
+pragmaoption() {
+	why=
+	for o in ref '' int 1a a-b; do
+		if timeout 60 $LCC -Wf-pragma=$o -S -o $T/option.ll tst/pragma/attr.c >$T/option.cerr 2>&1; then
+			why="$why -pragma=$o accepted"
+		elif ! grep "invalid pragma name space \`$o'" $T/option.cerr >/dev/null; then
+			why="$why -pragma=$o: `head -1 $T/option.cerr`"
+		fi
+	done
+	if [ -z "$why" ]; then report PASS option
+	else report FAIL option "$why"; fi
+}
+
 selected() {	# name: is it among the names given on the command line?
 	[ -z "$names" ] && return 0
 	for s in $names; do
@@ -471,6 +629,26 @@ llvm-bench)
 			else report FAIL $n "output differs from `basename $ref`"; fi
 		done
 	done ;;
+pragma)
+	if [ $ownlcc = 0 ]; then
+		report SKIP pragma "checks only lcc's messages and IR"
+	else
+		P="-Wf-pragma=knpu -Wf-pragma=npu2"
+		for src in tst/pragma/err*.c tst/pragma/err*.i; do
+			n=`basename $src`; n=${n%.*}; selected $n || continue
+			timeout 300 $LCC $P -Wf-e1000 -S -o $T/$n.ll $src >$T/$n.cerr 2>&1
+			if cmp -s tst/pragma/$n.2bk $T/$n.cerr; then report PASS $n
+			else report FAIL $n "messages differ from tst/pragma/$n.2bk"; fi
+		done
+		if selected ref; then
+			timeout 300 $LCC $P -A -A -S -o $T/ref.ll tst/pragma/ref.c >$T/ref.cerr 2>&1
+			if cmp -s tst/pragma/ref.2bk $T/ref.cerr; then report PASS ref
+			else report FAIL ref "messages differ from tst/pragma/ref.2bk"; fi
+		fi
+		selected attr && pragmattr
+		selected long && pragmalong
+		selected option && pragmaoption
+	fi ;;
 esac
 
 total=`expr $npass + $nfail + $ncfail + $ntimeout`

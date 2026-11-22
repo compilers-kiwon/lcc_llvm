@@ -1,0 +1,10 @@
+layer1 knpu.op = "conv2d", knpu.args = {in = @"act0", w = @"L1_W", bias = @"L1_B", mult = @"L1_M", shift = @"L1_S", out = @"act1", in_shape = array<i64: 1, 8, 8, 16>, stride = array<i64: 1, 1>, izp = -3 : i64, round = "double"}
+values knpu.op = "values", knpu.args = {pos = 7 : i64, neg = -3 : i64, plus = 5 : i64, sp = -4 : i64, hex = 127 : i64, HEX = 255 : i64, negx = -16 : i64, zero = 0 : i64, mzero = 0 : i64, max = 9223372036854775807 : i64, min = -9223372036854775808 : i64, minx = -9223372036854775808 : i64, maxx = 9223372036854775807 : i64, empty = array<i64>, one = array<i64: 5>, many = array<i64: 1, -2, 3, 16, -9223372036854775808>, str = "a\22b\5Cc", esc = "\07\08\0C\0A\0D\09\0B'?\00AA\FF\80", nul = "", obj = @"tent", st = @"st", ext = @"ext_only", only = @"only"}
+place1 knpu.op = "noargs", knpu.args = {}
+place2 knpu.op = "between", knpu.args = {a = @"act1"}, npu2.op = "second", npu2.args = {s = "another name space"}
+place3 knpu.op = "after_block", knpu.args = {in = @"act0"}
+place4 knpu.op = "last", knpu.args = {x = @"tent"}
+place5 knpu.op = "with_others", knpu.args = {x = @"st"}
+blockextern knpu.op = "blockextern", knpu.args = {a = @"st", b = @"later", c = @"blk_only"}
+sum knpu.op = "variadic", knpu.args = {n = array<i64: 1>}
+oldstyle knpu.op = "oldstyle", knpu.args = {in = @"act0"}, npu2.op = "oldstyle2", npu2.args = {}

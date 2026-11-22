@@ -1,0 +1,13 @@
+tst/pragma/err-ident.c:16: `prm' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:22: `loc' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:29: `g' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:36: `sl' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:42: `fn' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:43: `TT' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:44: `EC' in `#pragma knpu' is not a file-scope object
+tst/pragma/err-ident.c:45: undeclared identifier `tag' in `#pragma knpu'
+tst/pragma/err-ident.c:46: undeclared identifier `nosuch' in `#pragma knpu'
+tst/pragma/err-ident.c:47: undeclared identifier `IZP' in `#pragma knpu'
+tst/pragma/err-ident.c:48: undeclared identifier `L' in `#pragma knpu'
+tst/pragma/err-ident.c:59: undeclared identifier `lab' in `#pragma knpu'
+tst/pragma/err-ident.c:65: `fn2' in `#pragma knpu' is not a file-scope object
