@@ -158,6 +158,8 @@ static Symbol icon(unsigned long, int, int);
 static void ppnumber(char *);
 
 int gettok(void) {
+	if (pragmapending)
+		pragmatoken();
 	for (;;) {
 		register unsigned char *rcp = cp;
 		while (map[*rcp]&BLANK)
@@ -904,7 +906,9 @@ int getchr(void) {
 		if (!(map[*cp]&NEWLINE))
 			return *cp;
 		cp++;
+		pragmapeek++;
 		nextline();
+		pragmapeek--;
 		if (cp == limit)
 			return EOI;
 	}

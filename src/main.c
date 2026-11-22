@@ -165,6 +165,12 @@ void main_init(int argc, char *argv[]) {
 			IR->left_to_right = argv[i][15] - '0';
 		else if (strncmp(argv[i], "-wants_dag=", 11) == 0)
 			IR->wants_dag = argv[i][11] - '0';
+		else if (strncmp(argv[i], "-pragma=", 8) == 0) {
+			if (!pragmaname(argv[i] + 8)) {
+				fprint(stderr, "%s: invalid pragma name space `%s'\n", argv[0], argv[i] + 8);
+				exit(EXIT_FAILURE);
+			}
+		}
 		else if (*argv[i] != '-' || strcmp(argv[i], "-") == 0) {
 			if (infile == NULL)
 				infile = argv[i];

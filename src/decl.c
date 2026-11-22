@@ -900,7 +900,7 @@ void compound(int loop, struct swtch *swp, int lev) {
 		retv->ref = 1;
 		registers = append(retv, registers);
 	}
-	while (kind[t] == CHAR || kind[t] == STATIC
+	while (pragmaclaim(), kind[t] == CHAR || kind[t] == STATIC
 	|| istypename(t, tsym) && getchr() != ':')
 		decl(dcllocal);
 	{
@@ -913,7 +913,7 @@ void compound(int loop, struct swtch *swp, int lev) {
 	}
 	if (events.blockentry)
 		apply(events.blockentry, cp->u.block.locals, NULL);
-	while (kind[t] == IF || kind[t] == ID)
+	while (pragmaclaim(), kind[t] == IF || kind[t] == ID)
 		statement(loop, swp, lev);
 	walk(NULL, 0, 0);
 	foreach(identifiers, level, checkref, NULL);

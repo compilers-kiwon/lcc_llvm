@@ -498,6 +498,34 @@ extern void nextline(void);
 extern int getchr(void);
 extern int gettok(void);
 
+/* #pragma NS OP KEY=VALUE ... of a name space NS given by -pragma=NS */
+typedef struct pragma *Pragma;
+typedef struct pragmaarg *Pragmaarg;
+enum { PIDENT=1, PINT, PLIST, PSTRING };
+struct pragmaarg {
+	char *key;
+	int kind;		/* PIDENT, PINT, PLIST or PSTRING */
+	Symbol sym;		/* PIDENT: the file-level object */
+	char **ints;		/* PINT: ints[0]; PLIST: n of them; in decimal */
+	char *s;		/* PSTRING: its n bytes */
+	int n;
+	Pragmaarg link;
+};
+struct pragma {
+	char *ns, *op;
+	Pragmaarg args;		/* in source order */
+	Coordinate src;
+	char *func;		/* the name of the function with it */
+	int peeked;		/* != 0 if getchr read it */
+	Pragma link;
+};
+extern int pragmans, pragmapending, pragmapeek;
+extern int pragmaname(char *);
+extern int nspragma(void);
+extern void pragmatoken(void);
+extern void pragmaclaim(void);
+extern Pragma funcpragmas(Symbol);
+
 extern void emitcode(void);
 extern void gencode (Symbol[], Symbol[]);
 extern void fprint(FILE *f, const char *fmt, ...);

@@ -72,6 +72,7 @@ RCCOBJS=$Balloc$O \
 	$Binit$O \
 	$Binits$O \
 	$Binput$O \
+	$Bpragma$O \
 	$Blex$O \
 	$Blist$O \
 	$Bmain$O \
@@ -126,6 +127,7 @@ $Bgen$O:	src/gen.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/gen.c
 $Binit$O:	src/init.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/init.c
 $Binits$O:	src/inits.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/inits.c
 $Binput$O:	src/input.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/input.c
+$Bpragma$O:	src/pragma.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/pragma.c
 $Blex$O:	src/lex.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/lex.c
 $Blist$O:	src/list.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/list.c
 $Bmain$O:	src/main.c;	$(CC) $(CFLAGS) -c -Isrc -o $@ src/main.c
@@ -292,6 +294,7 @@ RCCSRCS=src/alloc.c \
 	src/init.c \
 	src/inits.c \
 	src/input.c \
+	src/pragma.c \
 	src/lex.c \
 	src/list.c \
 	src/main.c \

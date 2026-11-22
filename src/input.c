@@ -82,8 +82,13 @@ static void ident(void) {
 		cp++;
 }
 
-/* pragma - handle #pragma ref id... */
+/* pragma - handle #pragma ref id..., and #pragma NS ... of -pragma=NS */
 static void pragma(void) {
+	int pending = pragmapending;
+
+	if (pragmans > 0 && nspragma())
+		return;
+	pragmapending = 0;	/* gettok reads this line, not the next token */
 	if ((t = gettok()) == ID && strcmp(token, "ref") == 0)
 		for (;;) {
 			while (*cp == ' ' || *cp == '\t')
@@ -95,6 +100,7 @@ static void pragma(void) {
 				use(tsym, src);
 			}	
 		}
+	pragmapending |= pending;
 }
 
 /* resynch - set line number/file name in # n [ "file" ], #pragma, etc. */
