@@ -17,7 +17,10 @@
 #include "mlir/Conversion/UBToLLVM/UBToLLVM.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVMPass.h"
 #include "mlir/Conversion/VectorToSCF/VectorToSCF.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
+#include "mlir/Dialect/Vector/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/Passes.h"
@@ -77,8 +80,42 @@ void lcc::buildToAffinePipeline(OpPassManager &pm,
   pm.addPass(createCSEPass());
 }
 
+void lcc::buildToLinalgPipeline(OpPassManager &pm,
+                                const ToLinalgOptions &options) {
+  ToAffineOptions affine;
+  affine.remarks = options.remarks;
+  buildToAffinePipeline(pm, affine);
+  LccExpandShapesOptions shapes;
+  shapes.remarks = options.remarks;
+  pm.addPass(createLccExpandShapes(shapes));
+  LccDistributeReductionsOptions distribute;
+  distribute.remarks = options.remarks;
+  distribute.maxBufferBytes = options.maxBufferBytes;
+  pm.addPass(createLccDistributeReductions(distribute));
+  pm.addPass(createCanonicalizerPass());
+  pm.addPass(createCSEPass());
+  LccAffineToLinalgOptions linalg;
+  linalg.remarks = options.remarks;
+  pm.addPass(createLccAffineToLinalg(linalg));
+  pm.addPass(createLinalgSpecializeGenericOpsPass());
+  pm.addPass(createCanonicalizerPass());
+  pm.addPass(createCSEPass());
+}
+
 void lcc::buildLowerPipeline(OpPassManager &pm) {
-  pm.addPass(createConvertVectorToSCFPass());
+  // linalg operations, also after tiling, to loops; vector.mask and
+  // vector.multi_reduction, which vectorizing linalg makes, to vector
+  // operations the passes below lower.
+  pm.addPass(createConvertLinalgToLoopsPass());
+  pm.addNestedPass<func::FuncOp>(vector::createLowerVectorMaskPass());
+  pm.addNestedPass<func::FuncOp>(vector::createLowerVectorMultiReductionPass());
+  // Fully unrolled: otherwise the pass gives an n-D transfer a buffer, a
+  // memref.alloca at the start of the closest AutomaticAllocationScope,
+  // which for a tiled loop is the body of an scf.for, and
+  // convert-scf-to-cf makes that an alloca in a loop block, without
+  // stacksave/stackrestore: the stack grows in every iteration.
+  pm.addPass(createConvertVectorToSCFPass(
+      VectorTransferToSCFOptions().enableFullUnroll()));
   // Early: convert-vector-to-llvm first rewrites the whole module greedily.
   // After convert-scf-to-cf that would fold blocks so that the cases of a
   // switch pass block arguments to the same block, which needs the blocks
@@ -120,10 +157,19 @@ void lcc::registerLccOptPasses() {
       "lcc-index-loops, lcc-globals-to-memref, canonicalize, cse, "
       "lcc-scf-to-affine, canonicalize, cse)",
       buildToAffinePipeline);
+  PassPipelineRegistration<ToLinalgOptions>(
+      "lcc-to-linalg",
+      "Raise lcc's loop nests on global arrays to linalg (lcc-to-affine, "
+      "lcc-expand-shapes, lcc-distribute-reductions, canonicalize, cse, "
+      "lcc-affine-to-linalg, linalg-specialize-generic-ops, canonicalize, "
+      "cse)",
+      buildToLinalgPipeline);
   PassPipelineRegistration<>(
       "lcc-lower",
-      "Lower the output of lcc-to-scf or lcc-to-affine to the LLVM dialect "
-      "for mlir-translate (convert-vector-to-scf, convert-vector-to-llvm, "
+      "Lower the output of lcc-to-scf, lcc-to-affine or lcc-to-linalg to "
+      "the LLVM dialect for mlir-translate (convert-linalg-to-loops, "
+      "lower-vector-mask, lower-vector-multi-reduction, "
+      "convert-vector-to-scf{full-unroll}, convert-vector-to-llvm, "
       "expand-strided-metadata, lower-affine, convert-scf-to-cf, "
       "convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm, "
       "convert-cf-to-llvm, convert-func-to-llvm, "

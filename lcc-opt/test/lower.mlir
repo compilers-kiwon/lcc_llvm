@@ -4,13 +4,15 @@
 // RUN:   --implicit-check-not=ub.poison --implicit-check-not=arith. \
 // RUN:   --implicit-check-not=cf. --implicit-check-not=func. \
 // RUN:   --implicit-check-not=' affine.' --implicit-check-not=' memref.' \
-// RUN:   --implicit-check-not=' vector.'
+// RUN:   --implicit-check-not=' vector.' --implicit-check-not=' linalg.'
 //
 // lcc-lower lowers what lcc-to-scf leaves, scf and the ub.poison of
-// lift-cf-to-scf among it, and what lcc-to-affine leaves, also after
+// lift-cf-to-scf among it, what lcc-to-affine leaves, also after
 // affine-loop-tile and affine-super-vectorize (affine, memref globals,
-// vector transfers and reductions), to the LLVM dialect, which
-// mlir-translate takes.
+// vector transfers and reductions), and what lcc-to-linalg leaves, also
+// after transform scripts that tile and vectorize (linalg, views, allocas,
+// vector contractions, multi-reductions, transposing and masked
+// transfers), to the LLVM dialect, which mlir-translate takes.
 
 // CHECK-LABEL: llvm.func @sum(
 //       CHECK:   llvm.mlir.poison : i32
@@ -29,6 +31,13 @@
 //       CHECK:   llvm.intr.smin
 //       CHECK:   llvm.ptrtoint
 //       CHECK:   llvm.inttoptr
+// CHECK-LABEL: llvm.func @lin(
+//       CHECK:   llvm.alloca
+//       CHECK:   llvm.intr.masked.store
+//       CHECK:   llvm.return
+// CHECK-LABEL: llvm.func @tiled(
+//   CHECK-NOT:   llvm.alloca
+//       CHECK:   llvm.return
 
 func.func @sum(%n: i32, %p: !llvm.ptr) -> i32 {
   %c0 = arith.constant 0 : i32
@@ -94,4 +103,55 @@ func.func @dot(%n: index) -> !llvm.ptr {
   %q = arith.index_cast %p : index to i64
   %ptr = llvm.inttoptr %q : i64 to !llvm.ptr
   return %ptr : !llvm.ptr
+}
+
+// The output of lcc-to-linalg, after a transform script: linalg operations
+// on a view of a global, on a subview and on an alloca, a linalg.index, and
+// the vector operations of vectorizing linalg.
+func.func @lin(%n: index) {
+  %c0 = arith.constant 0 : index
+  %z = arith.constant 0 : i32
+  %z8 = arith.constant 0 : i8
+  %t = memref.get_global @tab : memref<16xi8>
+  %m = memref.get_global @acc : memref<4xi32>
+  %v = memref.expand_shape %t [[0, 1]] output_shape [4, 4] : memref<16xi8> into memref<4x4xi8>
+  %buf = memref.alloca() : memref<4x4xi32>
+  %sub = memref.subview %v[1, 0] [2, 4] [1, 1] : memref<4x4xi8> to memref<2x4xi8, strided<[4, 1], offset: 4>>
+  linalg.fill ins(%z : i32) outs(%buf : memref<4x4xi32>)
+  linalg.matmul ins(%v, %v : memref<4x4xi8>, memref<4x4xi8>) outs(%buf : memref<4x4xi32>)
+  linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>], iterator_types = ["reduction", "parallel"]} ins(%sub : memref<2x4xi8, strided<[4, 1], offset: 4>>) outs(%m : memref<4xi32>) {
+  ^bb0(%x: i8, %a: i32):
+    %i = linalg.index 0 : index
+    %ii = arith.index_cast %i : index to i32
+    %xe = arith.extsi %x : i8 to i32
+    %s = arith.addi %a, %xe : i32
+    %r = arith.addi %s, %ii : i32
+    linalg.yield %r : i32
+  }
+  %a = vector.transfer_read %v[%c0, %c0], %z8 {in_bounds = [true, true], permutation_map = affine_map<(d0, d1) -> (d1, d0)>} : memref<4x4xi8>, vector<4x4xi8>
+  %ae = arith.extsi %a : vector<4x4xi8> to vector<4x4xi32>
+  %b = vector.transfer_read %buf[%c0, %c0], %z {in_bounds = [true, true]} : memref<4x4xi32>, vector<4x4xi32>
+  %c = vector.contract {indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], iterator_types = ["parallel", "parallel", "reduction"], kind = #vector.kind<add>} %ae, %ae, %b : vector<4x4xi32>, vector<4x4xi32> into vector<4x4xi32>
+  %acc = arith.constant dense<0> : vector<4xi32>
+  %r = vector.multi_reduction <add>, %c, %acc [1] : vector<4x4xi32> to vector<4xi32>
+  %mask = vector.create_mask %n : vector<4xi1>
+  vector.mask %mask { vector.transfer_write %r, %m[%c0] : vector<4xi32>, memref<4xi32> } : vector<4xi1>
+  return
+}
+
+// A transposing transfer in a tile loop: convert-vector-to-scf would give
+// it a buffer at the start of the scf.for body, its allocation scope, which
+// convert-scf-to-cf leaves as an alloca in the loop, never freed; lcc-lower
+// unrolls it instead.
+func.func @tiled(%m: memref<4x4xf32>, %n: index) -> vector<4x4xf32> {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %pad = arith.constant 0.0 : f32
+  %z = arith.constant dense<0.0> : vector<4x4xf32>
+  %r = scf.for %i = %c0 to %n step %c1 iter_args(%a = %z) -> (vector<4x4xf32>) {
+    %v = vector.transfer_read %m[%c0, %c0], %pad {permutation_map = affine_map<(d0, d1) -> (d1, d0)>} : memref<4x4xf32>, vector<4x4xf32>
+    %s = arith.addf %a, %v : vector<4x4xf32>
+    scf.yield %s : vector<4x4xf32>
+  }
+  return %r : vector<4x4xf32>
 }

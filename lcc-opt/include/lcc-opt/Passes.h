@@ -142,16 +142,50 @@ struct ToAffineOptions : public mlir::PassPipelineOptions<ToAffineOptions> {
 void buildToAffinePipeline(mlir::OpPassManager &pm,
                            const ToAffineOptions &options);
 
-/// Adds the lcc-lower pipeline to `pm`: convert-vector-to-scf,
-/// convert-vector-to-llvm, expand-strided-metadata, lower-affine,
-/// convert-scf-to-cf, convert-ub-to-llvm, finalize-memref-to-llvm,
-/// convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm,
-/// reconcile-unrealized-casts, lcc-distinct-successors.  It lowers the
-/// output of lcc-to-scf and lcc-to-affine, also after upstream affine
-/// transformations such as affine-loop-tile and affine-super-vectorize, to
-/// the LLVM dialect for mlir-translate: lcc's driver lowers only arith, cf
-/// and func, but these leave scf, ub.poison (from lift-cf-to-scf), affine,
-/// memref and vector.  lcc-distinct-successors makes the LLVM IR of
+/// Options of the lcc-to-linalg pipeline.
+struct ToLinalgOptions : public mlir::PassPipelineOptions<ToLinalgOptions> {
+  Option<bool> remarks{
+      *this, "remarks",
+      llvm::cl::desc("Report each global and loop nest the passes of "
+                     "lcc-to-affine, lcc-expand-shapes, "
+                     "lcc-distribute-reductions and lcc-affine-to-linalg "
+                     "change or leave, as remarks"),
+      llvm::cl::init(false)};
+  Option<int64_t> maxBufferBytes{
+      *this, "max-buffer-bytes",
+      llvm::cl::desc("The most bytes of buffers lcc-distribute-reductions "
+                     "gives a function"),
+      llvm::cl::init(65536)};
+};
+
+/// Adds the lcc-to-linalg pipeline to `pm`: lcc-to-affine,
+/// lcc-expand-shapes, lcc-distribute-reductions, canonicalize, cse,
+/// lcc-affine-to-linalg, linalg-specialize-generic-ops, canonicalize, cse.
+/// It gives the 1-D global memrefs of a function the shape of their C
+/// arrays, splits loop nests around a reduction into a nest that sets a
+/// buffer, a nest that reduces into it and a nest that uses it, and turns
+/// the loop nests that only load and store at affine indices of their own
+/// loops into linalg.generic, and those that are named operations (matmul,
+/// broadcast, copy, ...) into those.
+void buildToLinalgPipeline(mlir::OpPassManager &pm,
+                           const ToLinalgOptions &options);
+
+/// Adds the lcc-lower pipeline to `pm`: convert-linalg-to-loops,
+/// lower-vector-mask, lower-vector-multi-reduction,
+/// convert-vector-to-scf{full-unroll}, convert-vector-to-llvm,
+/// expand-strided-metadata, lower-affine, convert-scf-to-cf,
+/// convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm,
+/// convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts,
+/// lcc-distinct-successors.  It lowers the
+/// output of lcc-to-scf, lcc-to-affine and lcc-to-linalg, also after
+/// upstream affine transformations such as affine-loop-tile and
+/// affine-super-vectorize and after transform dialect scripts that tile
+/// and vectorize linalg operations, to the LLVM dialect for mlir-translate:
+/// lcc's driver lowers only arith, cf and func, but these leave scf,
+/// ub.poison (from lift-cf-to-scf), affine, linalg, memref and vector.
+/// convert-vector-to-scf unrolls fully: its buffers would be allocas in
+/// the loops of tiled code, which convert-scf-to-cf does not free.
+/// lcc-distinct-successors makes the LLVM IR of
 /// mlir-translate the same from run to run.  convert-vector-to-llvm comes
 /// early: its greedy rewriting of the whole module, on cf, would make
 /// switches whose cases pass block arguments to the same block.

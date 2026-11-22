@@ -40,6 +40,7 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRFuncToLLVM
   MLIRFunctionInterfaces
   MLIRLinalgDialect
+  MLIRLinalgTransforms
   MLIRLLVMDialect
   MLIRMemRefDialect
   MLIRMemRefToLLVM
@@ -54,4 +55,5 @@ mlir_target_link_libraries(LccOptPasses PUBLIC
   MLIRUBToLLVM
   MLIRVectorToLLVMPass
   MLIRVectorToSCF
+  MLIRVectorTransforms
   )
