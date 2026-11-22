@@ -21,9 +21,9 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 만들어서 LLVM 21(`/usr/lib/llvm-21/bin`)을 쓴다.
 
 ```bash
-curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.2/lcc-v4.2-llvm.2-llvm-x86_64-linux.tar.gz
-tar -xzf lcc-v4.2-llvm.2-llvm-x86_64-linux.tar.gz
-L=$PWD/lcc-v4.2-llvm.2-llvm-x86_64-linux
+curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.3/lcc-v4.2-llvm.3-llvm-x86_64-linux.tar.gz
+tar -xzf lcc-v4.2-llvm.3-llvm-x86_64-linux.tar.gz
+L=$PWD/lcc-v4.2-llvm.3-llvm-x86_64-linux
 LCCDIR=$L $L/lcc -o hello hello.c && ./hello
 ```
 
@@ -268,7 +268,9 @@ lcc-opt 작업의 단계는 [lcc-opt-check.sh](.github/scripts/lcc-opt-check.sh)
 `v`로 시작하는 태그를 push하면 [release.yml](.github/workflows/release.yml)이 타깃·백엔드마다 lcc를 빌드하고
 시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다. lcc-opt는 압축에 넣지 않는다. 첫 릴리스는
 [v4.2-llvm.1](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.1)이고, 기본 LLVM을 23으로 바꾸고 lcc-opt를
-더한 [v4.2-llvm.2](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.2)가 그다음이다.
+더한 [v4.2-llvm.2](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.2)가 그다음, `#pragma`를 MLIR 함수
+속성으로 넘기는 [v4.2-llvm.3](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.3)([위 절](#pragma를-mlir-함수-속성으로))이
+그다음이다.
 
 ## Yocto
 
