@@ -82,6 +82,21 @@ static void ident(void) {
 		cp++;
 }
 
+/* isref - skip the first word of the #pragma at cp if it is ref; not
+   with gettok, which reads on in the next line if this one has none */
+static int isref(void) {
+	unsigned char *s = cp;
+
+	while (*s == ' ' || *s == '\t')
+		s++;
+	if (strncmp((char *)s, "ref", 3) != 0 || s[3] == '_'
+	|| s[3] >= 'a' && s[3] <= 'z' || s[3] >= 'A' && s[3] <= 'Z'
+	|| s[3] >= '0' && s[3] <= '9')
+		return 0;
+	cp = s + 3;
+	return 1;
+}
+
 /* pragma - handle #pragma ref id..., and #pragma NS ... of -pragma=NS */
 static void pragma(void) {
 	int pending = pragmapending;
@@ -89,7 +104,7 @@ static void pragma(void) {
 	if (pragmans > 0 && nspragma())
 		return;
 	pragmapending = 0;	/* gettok reads this line, not the next token */
-	if ((t = gettok()) == ID && strcmp(token, "ref") == 0)
+	if (isref())
 		for (;;) {
 			while (*cp == ' ' || *cp == '\t')
 				cp++;

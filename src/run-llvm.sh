@@ -33,6 +33,9 @@
 #                     errNAME.2bk, of ref.c with -A -A with ref.2bk (named
 #                     objects are used); attr.c compiled and run, stdout compared
 #                     with attr.1bk, its IR the same as without the options;
+#                     bare.c and bare.i (#pragma without a word) compiled
+#                     with and without the options and run, stdout compared
+#                     with bare.1bk;
 #                     with MLIR, the attributes of attr.c, also with
 #                     -Wf-llvmfunc, and of a generated #pragma longer than
 #                     rcc's buffer compared with attr.abk and what they must
@@ -646,6 +649,22 @@ pragma)
 			else report FAIL ref "messages differ from tst/pragma/ref.2bk"; fi
 		fi
 		selected attr && pragmattr
+		for src in tst/pragma/bare.c tst/pragma/bare.i; do
+			n=bare-${src##*.}; selected $n || continue
+			for x in $n $n-off; do
+				o=$P; [ $x = $n ] || o=
+				if ! timeout 300 $LCC $o -o $T/$x $src $LCCLIBS >$T/$x.cerr 2>&1; then
+					report CFAIL $x "`head -1 $T/$x.cerr`"
+					continue
+				fi
+				execute $x /dev/null 60
+				if [ $status = 124 ]; then report TIMEOUT $x
+				elif [ $status != 0 ]; then report FAIL $x "exit status $status"
+				elif ! cmp -s tst/pragma/bare.1bk $T/$x.out; then
+					report FAIL $x "stdout differs from tst/pragma/bare.1bk"
+				else report PASS $x; fi
+			done
+		done
 		selected long && pragmalong
 		selected option && pragmaoption
 	fi ;;
