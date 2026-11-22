@@ -4,7 +4,8 @@ lcc의 MLIR 백엔드(`-target=mlir/T`)가 낸 `.mlir`을 업스트림 MLIR의 �
 모양으로 올리는 도구다. MLIR 23으로 만든 `mlir-opt`이며, `MlirOptMain` 위에 업스트림의 방언·확장·패스를
 모두 등록하고 lcc-opt의 패스와 파이프라인을 더한다. 지금은 루프를 `scf.for`까지 올리는 파이프라인 `lcc-to-scf`와
 그 첫 부분인 `lcc-prepare`, 그 뒤에 전역 배열을 `memref.global`로, 그 배열만 다루는 루프 묶음을 `affine.for`로 올리는
-`lcc-to-affine`이 있다.
+`lcc-to-affine`, 그리고 그 배열을 C 배열의 모양으로 보고 리덕션 둘레의 루프를 나눈 뒤 루프 묶음을 linalg 연산으로
+올리는 `lcc-to-linalg`가 있다.
 
 lcc와 따로 빌드하는 프로그램이다. lcc의 코드는 들어 있지 않고 라이선스도 다르다([라이선스](#라이선스)).
 
@@ -49,7 +50,11 @@ ninja -C build-lcc-opt check-lcc-opt
 `globals-to-memref.mlir`, `scf-to-affine.mlir`은 lcc 출력 모양으로 손으로 쓴 입력으로 각 패스가 바꾸는 경우와 남기는
 경우를 보고, 남기는 이유는 `remarks=true`가 내는 remark로 본다. `distinct-successors.mlir`은 반복되는 후속 블록을 그 순서대로
 나누는 것을 본다. `to-affine.mlir`의 입력은 lcc가 `convfix.c`(x86_64와
-32비트 armhf)와 상수 가중치 표를 쓰는 변형에서 낸 `.mlir`이다.
+32비트 armhf)와 상수 가중치 표를 쓰는 변형에서 낸 `.mlir`이다. `expand-shapes.mlir`, `distribute-reductions.mlir`,
+`affine-to-linalg.mlir`은 각 패스가 바꾸는 경우와 남기는 경우를 손으로 쓴 affine 입력으로 보고, `to-linalg.mlir`의 입력은
+lcc가 `convfix.c`(x86_64, armhf), 상수 표판, float판, 행렬 곱, 3x3 합성곱에서 낸 `.mlir`이다. `transform.mlir`은
+transform 방언 스크립트로 `lcc-to-linalg`의 결과를 타일링·벡터화하고 `lcc-lower`로 내리는 것을 본다. `lower.mlir`은
+linalg와 벡터화한 linalg의 vector 연산도 본다.
 
 ## 사용
 
@@ -79,7 +84,7 @@ mlir-translate --mlir-to-llvmir foo.mlirbc -o foo.ll
 `lcc-opt --help`에 있다. `mlir-opt`과 달리 업스트림의 시험용 방언과 패스(`--test-*` 등)는 없다.
 
 `lcc-to-affine`은 고정 크기 파일 범위 배열을 상수 경계의 `for` 루프로 다루는 커널(포팅 규약)을 affine으로 올린다.
-업스트림 affine 변환을 그 뒤에 두고, 내릴 때는 역시 `lcc-lower`를 쓴다.
+업스트림 affine 변환을 그 뒤에 두고, 내릴 때는 역시 `lcc-lower`를 쓴다. `lcc-to-linalg`는 그 결과를 linalg로 올린다.
 
 ```bash
 build-lcc-opt/bin/lcc-opt --lcc-to-affine foo.mlir           # affine.for, affine.load, affine.store
@@ -90,7 +95,41 @@ build-lcc-opt/bin/lcc-opt --lcc-to-affine --affine-loop-tile=tile-sizes=8,8 \
 
 `--lcc-to-affine=remarks=true`를 주면 전역마다, 루프마다 바꾸었는지, 아니면 왜 남겼는지를 remark로 알린다
 (`--mlir-print-op-on-diagnostic=false`를 함께 주면 짧다). 업스트림 `affine-super-vectorize`에는 MLIR 23에서 틀린 코드를
-내거나 죽는 경우가 있다([업스트림 affine 변환](#업스트림-affine-변환)).
+내거나 죽는 경우가 있고, `affine-loop-fusion`처럼 루프 묶음을 다른 연산 너머로 옮기는 패스는 쓰면 안 된다
+([업스트림 affine 변환](#업스트림-affine-변환)).
+
+```bash
+build-lcc-opt/bin/lcc-opt --lcc-to-linalg foo.mlir           # linalg.matmul, linalg.generic 등
+build-lcc-opt/bin/lcc-opt --lcc-to-linalg \
+    --transform-preload-library=transform-library-paths=tile.mlir --transform-interpreter \
+    --lcc-lower --emit-bytecode foo.mlir -o foo.mlirbc
+```
+
+`lcc-to-linalg`의 옵션 `remarks`는 `lcc-to-affine`의 것과 같고, `max-buffer-bytes`는 `lcc-distribute-reductions`의
+버퍼 상한이다. linalg 연산의 타일링·벡터화는 transform 방언 스크립트로 한다. 위의 `tile.mlir`이 다음과 같으면
+`convfix.c`의 matmul을 o·p·i 방향 4x8x4로, 브로드캐스트와 원소별 연산을 4x4로 타일링하고 타일을 벡터화한다
+(`test/transform.mlir`와 같은 스크립트).
+
+```mlir
+module attributes {transform.with_named_sequence} {
+  transform.named_sequence @__transform_main(%root: !transform.any_op {transform.readonly}) {
+    %mm = transform.structured.match ops{["linalg.matmul"]} in %root : (!transform.any_op) -> !transform.any_op
+    %t, %l:3 = transform.structured.tile_using_for %mm tile_sizes [4, 8, 4]
+      : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op, !transform.any_op)
+    %ew = transform.structured.match ops{["linalg.broadcast", "linalg.generic"]} in %root : (!transform.any_op) -> !transform.any_op
+    %t2, %l2:2 = transform.structured.tile_using_for %ew tile_sizes [4, 4]
+      : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op)
+    transform.structured.vectorize %t : !transform.any_op
+    transform.structured.vectorize %t2 : !transform.any_op
+    %f = transform.structured.match ops{["func.func"]} in %root : (!transform.any_op) -> !transform.any_op
+    transform.apply_patterns to %f {
+      transform.apply_patterns.vector.transfer_permutation_patterns
+      transform.apply_patterns.canonicalization
+    } : !transform.any_op
+    transform.yield
+  }
+}
+```
 
 ## 파이프라인
 
@@ -99,7 +138,8 @@ build-lcc-opt/bin/lcc-opt --lcc-to-affine --affine-loop-tile=tile-sizes=8,8 \
 | `lcc-prepare` | lcc-memcpy-intrinsic, mem2reg, sroa, mem2reg, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas, lcc-split-aggregates, mem2reg, sroa, mem2reg, canonicalize, cse | lcc가 지역 변수와 매개변수마다 만든 `llvm.alloca`를 SSA 값으로 바꾸고 호출을 인라인한다 |
 | `lcc-to-scf` | lcc-prepare, lift-cf-to-scf, lcc-lift-llvm-func, canonicalize, cse, lcc-rotate-do-while, canonicalize, lcc-uplift-while, canonicalize, loop-invariant-code-motion, canonicalize, cse | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 올린다 |
 | `lcc-to-affine` | lcc-to-scf, lcc-index-loops, lcc-globals-to-memref, canonicalize, cse, lcc-scf-to-affine, canonicalize, cse | 셀 수 있는 루프를 index `scf.for`로, 전역 배열을 1차원 `memref.global`로, 그 배열만 affine 첨자로 다루는 루프 묶음을 `affine.for`로 올린다. 옵션 `remarks` |
-| `lcc-lower` | convert-vector-to-scf, convert-vector-to-llvm, expand-strided-metadata, lower-affine, convert-scf-to-cf, convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts, lcc-distinct-successors | `lcc-to-scf`·`lcc-to-affine`의 출력을, 업스트림 affine 변환 뒤에도, `mlir-translate`가 받는 LLVM 방언으로 내린다 |
+| `lcc-to-linalg` | lcc-to-affine, lcc-expand-shapes, lcc-distribute-reductions, canonicalize, cse, lcc-affine-to-linalg, linalg-specialize-generic-ops, canonicalize, cse | 함수마다 1차원 전역 memref를 C 배열의 모양으로 보고, 리덕션 둘레의 루프를 처음 값·리덕션·결과의 세 묶음으로 나눈 뒤, 묶음 자신의 루프 변수의 affine 첨자로만 읽고 쓰는 루프 묶음을 `linalg.generic`으로, 그중 이름 있는 연산(matmul, conv_2d, broadcast, fill, copy 등)은 그것으로 바꾼다. 옵션 `remarks`, `max-buffer-bytes` |
+| `lcc-lower` | convert-linalg-to-loops, lower-vector-mask, lower-vector-multi-reduction, convert-vector-to-scf, convert-vector-to-llvm, expand-strided-metadata, lower-affine, convert-scf-to-cf, convert-ub-to-llvm, finalize-memref-to-llvm, convert-arith-to-llvm, convert-cf-to-llvm, convert-func-to-llvm, reconcile-unrealized-casts, lcc-distinct-successors | `lcc-to-scf`·`lcc-to-affine`·`lcc-to-linalg`의 출력을, 업스트림 affine 변환과 linalg를 타일링·벡터화하는 transform 스크립트 뒤에도, `mlir-translate`가 받는 LLVM 방언으로 내린다 |
 
 MLIR의 인라이너는 인자 처리를 callee의 방언에, 인라인한 블록의 처리를 호출 연산의 방언에 맡긴다. LLVM 방언은
 `llvm.func`·`llvm.call`이면 `llvm.byval` 인자를 caller 쪽에 복사하고 callee의 상수 크기 `llvm.alloca`를 caller의
@@ -130,6 +170,11 @@ LLVM IR의 블록 순서와 phi 피연산자 순서가 실행마다 달라진다
 `lcc-prepare`만 돌리고 내리면 mem2reg가 만든 블록 인자 때문에 이런 switch가 생긴다. `convert-vector-to-llvm`은 앞에
 둔다. 이 패스는 변환 전에 모듈 전체를 탐욕적으로 다시 쓰는데, `convert-scf-to-cf` 뒤에 두면 블록을 합쳐 이런 switch를
 만든다. 앞에 두면 벡터가 없는 코드는 이 패스들이 없던 `lcc-lower`와 같은 LLVM IR이 된다(시험 묶음 5445개 파일).
+linalg를 루프로 내리는 `convert-linalg-to-loops`와 벡터화한 linalg가 남기는 `vector.mask`·`vector.multi_reduction`을 내리는
+패스는 맨 앞에 둔다. `convert-vector-to-scf`는 `full-unroll`로 돌린다. 그렇지 않으면 2차원 이상의 transfer에 임시 버퍼를
+가장 가까운 `AutomaticAllocationScope`의 처음에 `memref.alloca`로 두는데, 타일링한 코드에서 그것은 `scf.for`의 본문이고,
+`convert-scf-to-cf`는 그것을 stacksave/stackrestore 없이 루프 안의 `alloca`로 만들어 반복마다 스택이 자란다(시험 묶음의
+FloatMM이 일반 transform 스크립트로 스택을 넘쳤다. 업스트림 `mlir-opt`만으로 재현된다).
 
 `lcc-to-affine`의 세 패스는 포팅 규약을 어긴 코드를 틀리게 컴파일하지 않도록, 바꾼 뒤에도 같은 값이 됨을 상수와 값의
 범위로 보일 수 있을 때만 바꾸고 C의 부호 있는 넘침이 정의되지 않는다는 것에는 기대지 않는다. affine 분석은 다른
@@ -137,6 +182,13 @@ memref끼리 겹치지 않는다고 보고 다른 메모리 연산은 보지 않
 있으면 올리지 않는다. 시험 묶음의 lcc 출력(x86_64, 830개 파일)에서는 전역 157개(실수 표 포함)가 `memref.global`이
 되고 루프 묶음 49개(루프 79개)와 다른 루프 안의 묶음 7개가 올라간다. 시험 묶음은 규약대로 쓴 코드가 아니어서, 남는
 루프는 대부분 포인터 매개변수를 거친 접근(`llvm.getelementptr`), `llvm.func`(가변 인자 함수 등), 호출 때문이다.
+
+`lcc-to-linalg`의 세 패스도 같은 원칙을 따른다. 바꾼 뒤에도 같은 원소, 같은 순서임을 루프 경계와 affine 의존성 분석으로
+보일 때만 바꾸고, 보이지 못하면 affine으로 둔다. 시험 묶음의 lcc 출력(x86_64, 830개 파일)에서는 함수마다 전역 20개가
+보기로 펼쳐지고(4개는 묶음마다 모양이 다르거나 계수가 크기를 나누지 않아 1차원으로 남는다), 리덕션 둘레의 루프 6곳(iter_args
+리덕션 2, 메모리에 누적하는 행렬 곱 4)이 나뉘며, 루프 묶음 25개가 linalg(`linalg.fill` 14, `linalg.generic` 7,
+`linalg.matmul` 4)가 된다. iter_args 리덕션은 대부분 둘레 루프 없이 함수 본문에 있어(18) 나누지 않는다. 남는 묶음은 주로
+그런 리덕션(18), 바깥 루프의 변수를 첨자에 쓰는 안쪽 묶음(14), 첨자가 루프 변수의 합인 출력(12) 때문이다.
 
 ## 패스
 
@@ -277,9 +329,86 @@ affine 맵으로 만든다. 업스트림 `affine-raise-from-memref`는 index의 
 lcc 주소 계산의 `arith.shli`, 확장, index 캐스트는 알아보지 못하며, 올리지 못한 접근은 affine 루프 안에 `memref.load`·
 `memref.store`로 남기는데 affine 분석은 그것을 보지 않는다.
 
-묶음 사이를 옮기는 업스트림 패스(`affine-loop-fusion` 등)는 묶음 밖의 호출과 포인터 접근을 보지 않아 안전하지 않다. 예를
-들어 MLIR 23의 `affine-loop-fusion`은 producer 모드에서도 루프 묶음을 `func.call`이나, 주소가 빠져나간 전역으로의
-`llvm.store` 너머로 옮겨, 그 호출이나 저장이 같은 전역을 고치면 결과가 틀린다.
+이 패스는 루프 묶음 안만 보므로, 같은 함수의 묶음 밖에 호출이나 포인터를 거친 접근이 있어도 묶음을 올린다. 그래서
+루프 묶음을 다른 연산 너머로 옮기는 업스트림 패스(`affine-loop-fusion` 등)는 쓰면 안 된다
+([업스트림 affine 변환](#업스트림-affine-변환)).
+
+### `lcc-expand-shapes`
+
+lcc-globals-to-memref는 전역 배열을 1차원 `memref.global`로 만들고, lcc-scf-to-affine은 그것을 C 배열의 행 우선 첨자
+(`p * 16 + i`)로 읽고 쓴다. 이 패스는 `func.func`마다, 그 함수가 `memref.get_global`로 다루는 1차원 전역마다 첨자가
+보이는 모양을 찾아 함수 처음에 `memref.expand_shape` 보기(view) 하나를 두고, 그 함수에서 그 전역을 읽고 쓰는
+`affine.load`·`affine.store`·`memref.load`·`memref.store`를 모두 그 보기의 접근으로 바꾼다. affine 분석과 linalg는
+서로 다른 memref 값을 겹치지 않는 메모리로 보므로, 한 함수에서 한 전역은 보기 하나로만 다루거나 펼치지 않는다.
+
+모양은 affine 첨자의 계수로 정한다. 계수들과 1을 큰 것부터 s_1 > s_2 > … > 1로 놓아 각각이 바로 앞의 것을 나누고 s_1이
+원소 수 N을 나누면 모양은 [N / s_1, s_1 / s_2, …, s_(k-1)]이다(`memref<1024xi8>`을 `p * 16 + i`로 읽으면 64x16). 첨자의
+항은 계수를 나누는 가장 바깥 차원으로 가고, 상수는 안쪽 차원부터 그 차원 안에 남도록 나뉜다(`i`가 [1, 17)이면
+`p * 16 + i - 1`은 [p, i - 1]). 첫 차원이 아닌 차원의 첨자가 루프 경계로 계산한 범위에서 그 차원 안에 있음을 보일 수
+있어야 하고 첫 차원도 범위 안이어야 한다. 그렇지 않은 첨자(`i`가 [0, 16)인 `p * 16 + i + 1`처럼 행을 넘을 수 있는 것)가
+하나라도 있거나, 계수가 포개지지 않거나(6과 4), 루프 묶음마다 필요한 모양이 다르면(한 묶음은 4x16, 다른 묶음은 8x8)
+그 함수에서 그 전역은 1차원으로 둔다. affine 루프 밖의 `memref.load`·`memref.store`는 첨자 x를
+[x floordiv s_1, (x mod s_1) floordiv s_2, …, x mod s_(k-1)]로 바꾼다. 어떤 x에서나 같은 원소이므로 x의 범위를 몰라도
+되고 배열 밖 접근이 정의되지 않는다는 것에 기대지 않는다. 포인터를 만드는 `memref.extract_aligned_pointer_as_index`는
+1차원 memref에 그대로 두고, 그 밖의 쓰임(`memref.cast` 등)이 있으면 그 함수에서 그 전역은 1차원으로 둔다.
+
+### `lcc-distribute-reductions`
+
+C의 리덕션
+
+```c
+for (p = 0; p < 64; p++)
+	for (o = 0; o < 32; o++) {
+		int acc = bias[o];
+		for (i = 0; i < 16; i++)
+			acc += w[o][i] * in[p][i];
+		out[p][o] = clamp(acc);
+	}
+```
+
+은 lcc-to-affine 뒤 `p`·`o` 루프 안의 iter_args `affine.for`가 된다. 이 패스는 리덕션 변수를 둘레 루프의 반복마다 칸이
+하나씩 있는 버퍼(함수 처음의 `memref.alloca`, 여기서는 `memref<64x32xi32>`)로 펴고, 둘레 루프를 리덕션 루프 앞의 문장,
+리덕션 루프, 뒤의 문장의 세 묶음으로 나눈다. 첫 묶음은 처음 값을 버퍼에 쓰고(`buf[p][o] = bias[o]`), 둘째 묶음은
+리덕션 루프의 반복마다 버퍼를 읽어 계산하고 다시 쓰며(`buf[p][o] += w[o][i] * in[p][i]`, `i` 순서대로), 셋째 묶음은
+결과를 읽어 쓴다(`out[p][o] = clamp(buf[p][o])`). 문장마다 제 묶음 안의 순서가 그대로이므로 float 리덕션도 같은 값을
+같은 순서로 더한다. 리덕션 루프 안에 완전히 중첩되어 iter_args를 그대로 이어받는 리덕션 루프(`for (r…) for (s…) t += …`)는
+같은 버퍼를 쓴다. 뒤 묶음이 앞 문장의 값을 쓰면, 루프 변수와 바깥 값의 부작용 없는 계산은 쓰는 묶음에서 다시 계산하고
+그 밖의 것(load 등)은 버퍼로 편다. iter_args 없이 메모리에 누적하는 루프, 곧 자기 루프 변수에 기대지 않는 첨자에
+저장하는 루프(`c[i][j] = 0; for (k…) c[i][j] += a[i][k] * b[k][j]`의 `k` 루프)의 둘레 루프도 버퍼 없이 같이 나눈다.
+
+나누는 둘레 루프는 리덕션 루프를 둘러싼 루프와, 그 바깥으로 본문이 부작용 없는 연산과 다음 루프뿐인 루프들이다. 상수
+경계에 반복이 있고 iter_args가 없어야 하며, 리덕션 루프 앞뒤의 문장은 `affine.load`, `affine.store`, 부작용 없는 연산
+이어야 한다. 그리고 affine 의존성 분석(`checkMemrefAccessDependence`)으로, 둘레 루프 안의 두 접근(하나는 store)이 둘레
+루프의 서로 다른 반복 사이에서 어느 방향으로도 의존하지 않음을 보일 때만 나눈다. 그러면 어느 문장도 뒤 문장에 의존하지
+않으므로 앞 문장 전부, 리덕션 전부, 뒤 문장 전부의 순서로 실행해도 모든 의존이 지켜진다. 같은 전역을 리덕션 앞에서 읽고
+뒤에서 같은 원소에 쓰는 것은 한 반복 안의 의존이라 나누고, 다음 원소에 쓰는 것(다음 반복이 그것을 읽음)은 남긴다. 다음
+원소를 읽고 이 원소에 쓰는 반대 방향은 나누어도 되지만, 둘레 루프가 옮기는 의존이 하나라도 있으면 남기므로 이것도
+남긴다. 한 메모리를 서로 다른 memref 값으로 다루거나, 접근하는 memref가 `memref.get_global`이나 `memref.alloca`에서
+나오지 않거나, 분석이 실패하면 남긴다. 버퍼는 스택에 있으므로 함수마다 모두 `max-buffer-bytes`(기본 65536) 바이트까지이고,
+넘으면 그 리덕션은 affine으로 남는다. 안쪽 루프부터 라운드마다 나누므로, 한 라운드에서 생긴 묶음을 둘러싼 리덕션은 다음
+라운드에서 나눈다.
+
+### `lcc-affine-to-linalg`
+
+완전히 중첩된 `affine.for` 묶음 가운데 가장 안쪽 본문이 묶음의 루프 변수의 affine 첨자로 memref를 읽고 쓰고 부작용
+없는 연산으로 계산하기만 하는 것을, 루프마다 반복 차원 하나를 루프 순서대로 가진 `linalg.generic`으로 바꾼다. linalg는
+이것을 같은 루프로 내린다. 다음을 모두 만족해야 바꾸고, 아니면 affine으로 둔다.
+
+- 모든 루프가 상수 경계에 반복이 있고 iter_args가 없으며, 바깥 루프의 본문은 부작용 없는 연산과 다음 루프뿐이다.
+- 모든 첨자가 묶음의 루프 변수 `i_k`의 `c + Σ a_k·i_k`(상수 `a_k ≥ 0`과 `c`)이고 memref(정적 모양, 항등 배치) 안에 있다.
+- 쓰는 memref마다 `affine.store`가 하나이고 그 첨자는 서로 다른 루프 변수에 상수를 더한 것이며, 그 memref는 같은
+  첨자로만 읽는다(누적하는 출력). store 뒤의 load는 저장한 값을 읽는다. 읽기만 하는 memref는 입력이고, 첨자가 다르면
+  다른 입력이다. 한 메모리(같은 전역의 `memref.get_global`, 같은 `memref.alloca`)를 서로 다른 memref 값으로 다루거나,
+  `memref.get_global`·`memref.alloca`에서 나오지 않은 memref가 있으면 남긴다.
+
+반복 차원 `j_k`는 루프의 반복 번호(0부터)이고 루프 변수는 `lb + step·j_k`다. 첨자 `c + a·j_k`는 오프셋 `c`, 크기 반복 수,
+보폭 `a`인 `memref.subview`의 첨자 `j_k`가 되고, 상수 첨자는 크기 1인 subview, 루프 변수의 합은 그 범위만 한 subview가
+된다. 그래서 첨자가 `j_k` 하나뿐인 차원은 그 루프의 반복 수만큼 크고, linalg는 그런 차원에서 반복 수를 알아낸다. 그런
+첨자가 없는 루프가 있으면 남긴다. 본문이 쓰는 루프 변수는 `lb + step·linalg.index`가 된다. 모든 출력의 첨자에 있는
+차원은 parallel, 아니면 reduction이다. 출력의 첨자가 서로 다른 루프 변수이므로 parallel 차원의 서로 다른 반복은 서로
+다른 출력 원소를 쓰고 입력은 쓰지 않아 서로 의존하지 않는다. 뒤의 `linalg-specialize-generic-ops`는 이름 있는 연산으로
+바꿀 수 있는 것을 바꾼다. `convfix.c`의 곱-합은 입력을 C의 곱 순서(`w`, `in`)로 두므로, 반복 차원이 `o`, `p`, `i` 순서이고
+출력 맵이 `(d1, d0)`인 `linalg.matmul`이 된다. 각 출력 원소의 덧셈은 여전히 `i` 순서다.
 
 ### `lcc-distinct-successors`
 
@@ -308,6 +437,36 @@ aarch64에서 결과가 gcc -O2와 같다). 다만 MLIR 23의 `affine-super-vect
 - 횟수가 벡터 크기의 배수가 아닌 루프(예: 5회, 8폭)를 마스크 없이 `in_bounds = [true]`로 벡터화해 루프 범위 밖 원소에
   쓴다.
 - `vectorize-reductions=true`에서 유도 변수 값을 쓰는 리덕션(`s += i`)을 만나면 죽는다.
+
+루프 묶음을 다른 연산 너머로 옮기는 패스(`affine-loop-fusion` 등)는 쓰면 안 된다. lcc-opt는 루프 묶음 안만 보므로, 같은
+함수의 묶음 밖에 호출이나 포인터를 거친 접근이 있어도 묶음을 올린다. 시험 묶음의 lcc 출력(x86_64, 830개 파일)에서
+`lcc-to-linalg`로 묶음이 올라간 함수 34개 중 23개에 호출이나 `llvm.load`·`llvm.store`가 있다. MLIR 23의
+`affine-loop-fusion`은 이런 연산을 보지 않고, producer 모드에서도 루프 묶음을 `func.call`이나 주소가 빠져나간 전역으로의
+`llvm.store` 너머로 옮긴다. 그 호출이나 저장이 같은 전역을 고치면 결과가 틀린다. 업스트림에도 비슷한 이슈가 있다
+(producer 루프 안의 호출 [llvm/llvm-project#211591](https://github.com/llvm/llvm-project/issues/211591), 묶음 사이의 호출이
+받는 `memref.cast` 별칭 [llvm/llvm-project#211599](https://github.com/llvm/llvm-project/issues/211599)).
+
+## 업스트림 linalg 변환과 transform
+
+`lcc-to-linalg`의 결과에는 transform 방언 스크립트(`--transform-preload-library=transform-library-paths=스크립트
+--transform-interpreter`)로 linalg를 타일링하고 벡터화할 수 있다. [사용](#사용)의 스크립트로 `convfix.c`, 상수 표판,
+float판이 x86_64와 aarch64에서 `-O0`·`-O2` 모두 gcc -O2(float판은 `-ffp-contract=off`)와 비트까지 같다. 벡터화한 matmul
+타일의 리덕션은 `vector.multi_reduction`이고, `lcc-lower`가 그것을 리덕션 차원의 순서대로 누적기에 더하므로 float도 같은
+값이 된다. `transform.structured.vectorize_children_and_apply_patterns`는 기본으로 그런 리덕션을 `vector.contract`로 바꾸는데,
+`convert-vector-to-llvm`은 그것을 각 내적을 +0.0부터 차례로 더한 뒤 누적기에 더하는 식으로 내린다. 정수는 같지만 float판은
+C 순서와 달라 10240값 중 2058개가 gcc와 다르다(같은 순서로 흉내 낸 C와는 비트까지 같다). 순서를 지키려면
+`{disable_multi_reduction_to_contract_patterns}`를 준다.
+
+lcc-opt의 패스, 위의 transform(`tile_using_for`, `vectorize`, `vectorize_children_and_apply_patterns`, transfer 치환 패턴,
+canonicalize), `linalg-specialize-generic-ops`, `lcc-lower`는 연산을 다른 연산 너머로 옮기지 않는다.
+`lcc-distribute-reductions`는 둘레 루프 안에서만 문장을 옮기는데, 그 안에는 affine 접근과 부작용 없는 연산뿐이다. 묶음
+사이에 호출과 주소가 빠져나간 전역으로의 `llvm.store`가 있는 프로그램에서 이 변환들은 순서를 지켜 결과가 gcc와 같다.
+linalg의 생산자 fusion(`transform.structured.fuse`, `fuse_into_containing_op`)은 텐서 값의 생산자를 따라가므로 memref인
+`lcc-to-linalg`의 결과에는 적용되지 않는다. vector transfer의 canonicalize 패턴(`TransferReadAfterWriteToBroadcast`,
+`FoldWaw`)은 텐서에만 쓰이고, `vectorize_children_and_apply_patterns`의 `LinalgCopyVTRForwardingPattern`·
+`LinalgCopyVTWForwardingPattern`은 `memref.copy`와 `memref.alloc`·`memref.view`에만 쓰이는데 lcc-opt는 그런 연산을 만들지
+않는다. 그러나 linalg를 affine 루프로 내린 뒤(`convert-linalg-to-affine-loops`)의 `affine-loop-fusion`은 `lcc-to-affine`의
+결과에서와 마찬가지로 묶음을 호출과 `llvm.store` 너머로 옮겨 결과가 틀린다([업스트림 affine 변환](#업스트림-affine-변환)).
 
 ## 디렉터리
 
