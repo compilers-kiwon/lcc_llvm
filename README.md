@@ -16,13 +16,14 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 
 **릴리스 파일로.** 빌드할 것 없이 x86_64 리눅스에서 바로 쓴다. 타깃·백엔드마다 압축 파일이 하나씩
 [Releases](https://github.com/compilers-kiwon/lcc_llvm/releases)에 있다. llvm 드라이버는 clang 18이, mlir
-드라이버는 LLVM 23이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)). 단 첫 릴리스 v4.2-llvm.1의
-mlir 압축은 기본값을 23으로 바꾸기 전에 만들어서 LLVM 21(`/usr/lib/llvm-21/bin`)을 쓴다.
+드라이버는 LLVM 23이 있어야 한다([필요한 것](#필요한-것-ubuntu-2404-기준)). 압축에는 lcc만 들어 있고
+[lcc-opt](#lcc-opt)는 [소스로 빌드한다](#lcc-opt-빌드). 첫 릴리스 v4.2-llvm.1의 mlir 압축은 기본값을 23으로 바꾸기 전에
+만들어서 LLVM 21(`/usr/lib/llvm-21/bin`)을 쓴다.
 
 ```bash
-curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.1/lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
-tar -xzf lcc-v4.2-llvm.1-llvm-x86_64-linux.tar.gz
-L=$PWD/lcc-v4.2-llvm.1-llvm-x86_64-linux
+curl -fsSLO https://github.com/compilers-kiwon/lcc_llvm/releases/download/v4.2-llvm.2/lcc-v4.2-llvm.2-llvm-x86_64-linux.tar.gz
+tar -xzf lcc-v4.2-llvm.2-llvm-x86_64-linux.tar.gz
+L=$PWD/lcc-v4.2-llvm.2-llvm-x86_64-linux
 LCCDIR=$L $L/lcc -o hello hello.c && ./hello
 ```
 
@@ -215,8 +216,9 @@ lcc-opt 작업의 단계는 [lcc-opt-check.sh](.github/scripts/lcc-opt-check.sh)
 `lcc-opt-check.sh all T 작업디렉터리 시험묶음디렉터리`가 그 단계를 차례로 모두 돈다.
 
 `v`로 시작하는 태그를 push하면 [release.yml](.github/workflows/release.yml)이 타깃·백엔드마다 lcc를 빌드하고
-시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다. 첫 릴리스는
-[v4.2-llvm.1](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.1)이다.
+시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다. lcc-opt는 압축에 넣지 않는다. 첫 릴리스는
+[v4.2-llvm.1](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.1)이고, 기본 LLVM을 23으로 바꾸고 lcc-opt를
+더한 [v4.2-llvm.2](https://github.com/compilers-kiwon/lcc_llvm/releases/tag/v4.2-llvm.2)가 그다음이다.
 
 ## Yocto
 
