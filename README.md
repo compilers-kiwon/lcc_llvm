@@ -9,6 +9,7 @@ lcc는 Christopher W. Fraser와 David R. Hanson이 만든 재타깃 가능한 C8
 - [원본 lcc 4.2 README(번역)](#원본-lcc-42-readme-번역)
 - [lcc 4.x 코드 생성 인터페이스](https://drh.github.io/lcc/documents/interface4.pdf) — 백엔드가 받는 중간 코드
 - [meta-lcc](meta-lcc/README.md) — lcc를 Yocto 교차 툴체인에 넣는 레이어
+- [lcc-opt](lcc-opt/README.md) — lcc의 MLIR을 affine·linalg로 올리는 도구
 - [CPYRIGHT](CPYRIGHT) — lcc의 라이선스
 
 ## 시작하기
@@ -204,11 +205,14 @@ GitHub Actions가 `master`에 push하거나 PR을 열 때마다 [ci.yml](.github
 | `llvm/T`, `mlir/T` | 여섯 타깃 × 두 백엔드로 빌드하고 위 시험 묶음 전부, unit의 변형 셋(gcc 드라이버, 최적화한 드라이버, `-Wa-O2`), selfhost(Cortex-M3 빼고) |
 | ASan + UBSan | lcc 자체(cpp, rcc, 드라이버)를 ASan·UBSan으로 빌드해 x86_64의 두 백엔드로 위 시험 묶음을 돌린다. 첫 보고에서 멈춘다 |
 | x86_64 extras | 원래 x86/linux 백엔드(`run-x86.sh`), 두 백엔드 비교(`cmp-backends.sh`), `mlir-lint.sh -t` |
+| `lcc-opt, T` | x86_64와 aarch64. [lcc-opt](#lcc-opt)를 빌드해 lit 시험, ASan·UBSan으로 빌드해 다시 lit 시험, `lcc-opt/kernels/check.sh`, 드라이버가 lcc-opt를 거치는 lcc로 위 시험 묶음(unit은 최적화한 드라이버로도) |
 | riscv32 toolchain | Ubuntu에 없는 riscv32 툴체인을 빌드해 캐시에 둔다(처음 한 번 한 시간쯤) |
 | Yocto layer | meta-lcc를 openembedded-core로 파싱하고 레시피가 무엇으로 풀리는지 확인 |
 
 외부 시험 묶음은 정해 둔 커밋으로 CI에서 받는다([fetch-suites.sh](.github/scripts/fetch-suites.sh)).
 타깃 하나의 설치·빌드는 [ci-target.sh](.github/scripts/ci-target.sh)가 하므로 로컬에서도 같은 명령으로 재현할 수 있다.
+lcc-opt 작업의 단계는 [lcc-opt-check.sh](.github/scripts/lcc-opt-check.sh)의 하위 명령이고,
+`lcc-opt-check.sh all T 작업디렉터리 시험묶음디렉터리`가 그 단계를 차례로 모두 돈다.
 
 `v`로 시작하는 태그를 push하면 [release.yml](.github/workflows/release.yml)이 타깃·백엔드마다 lcc를 빌드하고
 시험한 뒤 압축 파일(`lcc-TAG-BACKEND-TARGET.tar.gz`)로 GitHub Release에 올린다. 첫 릴리스는
@@ -221,6 +225,110 @@ GitHub Actions가 `master`에 push하거나 PR을 열 때마다 [ci.yml](.github
 `TARGET_PREFIX-lcc-mlir`도 생긴다. 오브젝트는 Yocto의 `llc`(MLIR은 `mlir-opt`, `mlir-translate`를 거쳐)가
 만들고 링크는 툴체인의 gcc가 한다. 리눅스 타깃 다섯을 지원하며, qemux86-64, qemuarm64, qemuriscv64,
 qemuarm, qemuriscv32에서 두 드라이버 모두 위 시험 묶음이 전부 통과한다.
+
+## lcc-opt
+
+[lcc-opt](lcc-opt/README.md)는 mlir 백엔드가 낸 `.mlir`을 업스트림 MLIR의 최적화가 다룰 수 있는 모양으로 올리는 도구다. MLIR 23의
+`mlir-opt`에 lcc-opt의 패스와 파이프라인을 더한 프로그램으로, 지역 변수를 SSA 값으로 바꾸고 호출을 인라인한 뒤 루프를 `scf.for`로,
+고정 크기 전역 배열을 다루는 루프 묶음을 `affine.for`로, 다시 `linalg.matmul` 같은 linalg 연산으로 올린다. 그 결과에 업스트림의
+affine 변환이나 linalg를 타일링·벡터화하는 transform 스크립트를 쓰고, LLVM 방언으로 내려 `mlir-translate`와 clang으로 오브젝트를
+만든다. lcc와 따로 빌드하며, lcc의 코드는 들어 있지 않고 라이선스는
+`Apache-2.0 WITH LLVM-exception`이다([LICENSE](lcc-opt/LICENSE)).
+
+| 파이프라인 | 하는 일 |
+| :- | :- |
+| `lcc-prepare` | lcc가 지역 변수와 매개변수마다 만든 alloca를 SSA 값으로 바꾸고 호출을 인라인 |
+| `lcc-to-scf` | 루프를 `scf.while`로, 셀 수 있는 루프는 `scf.for`로 |
+| `lcc-to-affine` | 전역 배열을 `memref.global`로, 그 배열만 affine 첨자로 다루는 루프 묶음을 `affine.for`로 |
+| `lcc-to-linalg` | 전역 배열을 C 배열의 모양으로 보고, 리덕션 둘레의 루프를 나누고, 루프 묶음을 linalg 연산으로 |
+| `lcc-lower` | 위의 결과를, 업스트림 변환과 transform 스크립트 뒤에도, `mlir-translate`가 받는 LLVM 방언으로 |
+
+### lcc-opt 빌드
+
+[apt.llvm.org](https://apt.llvm.org)의 LLVM 23 패키지 `libmlir-23-dev`, `llvm-23-dev`, `mlir-23-tools`와 `cmake`,
+`ninja-build`가 있으면 된다(Ubuntu 24.04 기준).
+
+```bash
+cmake -G Ninja -S lcc-opt -B build-lcc-opt
+ninja -C build-lcc-opt                          # build-lcc-opt/bin/lcc-opt
+ninja -C build-lcc-opt check-lcc-opt            # lit 시험
+```
+
+### lcc-opt 사용
+
+lcc 드라이버는 lcc-opt를 부르지 않으므로 단계마다 명령을 쓴다. mlir 백엔드로 빌드한 lcc로 `.mlir`을 만들고, lcc-opt로 올리고
+변환하고 내린 뒤, LLVM 23의 `mlir-translate`와 clang으로 오브젝트를 만든다. 아래는 [convfix.c](lcc-opt/kernels/convfix.c)를
+linalg로 올려 타일링·벡터화하고, 같은 디렉터리의 `main.c`와 링크해 실행한다.
+
+```bash
+B=$PWD/build-mlir; mkdir -p $B
+make BUILDDIR=$B HOSTFILE=etc/mlir-x86_64-linux.c all headers
+LCCDIR=$B $B/lcc -S lcc-opt/kernels/convfix.c                   # convfix.mlir
+build-lcc-opt/bin/lcc-opt --lcc-to-linalg \
+    --transform-preload-library=transform-library-paths=lcc-opt/kernels/tile-vector.mlir \
+    --transform-interpreter --lcc-lower --emit-bytecode convfix.mlir -o convfix.mlirbc
+/usr/lib/llvm-23/bin/mlir-translate --mlir-to-llvmir convfix.mlirbc -o convfix.ll
+/usr/lib/llvm-23/bin/clang -O2 -c convfix.ll                    # convfix.o
+gcc -O2 -DCONVFIX -o convfix lcc-opt/kernels/main.c convfix.o && ./convfix
+```
+
+`--lcc-to-linalg`가 linalg로 올리고, transform 스크립트 [tile-vector.mlir](lcc-opt/kernels/tile-vector.mlir)이 linalg 연산을
+타일링·벡터화하며, `--lcc-lower`가 LLVM 방언으로 내린다. transform 스크립트는 `--transform-preload-library`로 준다. 페이로드 안에
+두면 transform 모듈이 남아 `mlir-translate`가 읽지 못한다. MLIR 23의 텍스트 형식은 `x86_fp80`·`fp128` 상수와 `i64` switch의 일부
+값을 다시 읽을 때 바꾸므로, 도구 사이에는 bytecode(`--emit-bytecode`)로 넘긴다. affine에서 멈추려면 `--lcc-to-linalg` 대신
+`--lcc-to-affine`을 쓰고 그 뒤에 업스트림 affine 변환(`--affine-loop-tile=tile-sizes=8,8`,
+`'--affine-super-vectorize=virtual-vector-size=16 vectorize-reductions=true'` 등)을 둔다. `--lcc-to-linalg=remarks=true`처럼
+`remarks=true`를 주면 전역과 루프 묶음마다 바꾸었는지, 아니면 왜 남겼는지를 알려 준다.
+
+### 완료 기준과 결과
+
+[lcc-opt/kernels](lcc-opt/kernels)의 커널로 확인한다. `convfix.c`는 고정 크기 전역 배열의 1x1 int8 합성곱(곱-합, bias,
+-128~127로 자르기)이고, 상수 가중치 표판 `convw.c`, float판 `convff.c`, 행렬 곱 `mm.c`, 3x3 합성곱 `conv3.c`가 더 있다.
+[check.sh](lcc-opt/kernels/check.sh)가 IR의 모양을 보고, 커널마다 구성 여덟(lcc 드라이버 그대로, affine, affine 타일링, affine
+벡터화, linalg, linalg 타일링, 타일링과 벡터화, 마스크 벡터화)으로 만든 LLVM IR을 clang `-O0`·`-O2`로 컴파일해 `gcc -O2`로
+컴파일한 것과 실행 결과를 비교한다.
+
+| 기준 | 결과 |
+| :- | :- |
+| ① `convfix.c`가 affine으로 오르고, 업스트림 `affine-loop-tile`과 `affine-super-vectorize`(`vectorize-reductions`)가 그 IR을 바꾼다 | `affine.for` 셋. 타일링 뒤 다섯, 벡터화 뒤 벡터 읽기와 `vector.reduction` |
+| ② linalg로 올라 곱-합은 matmul, bias와 자르기는 원소별 연산이 된다 | `linalg.broadcast`(bias), `linalg.matmul`(곱-합), parallel 차원 둘인 `linalg.generic`(자르기) |
+| ③ transform 스크립트로 linalg 연산을 타일링하고 벡터화한다 | [tile.mlir](lcc-opt/kernels/tile.mlir)(타일링), [tile-vector.mlir](lcc-opt/kernels/tile-vector.mlir)(타일링과 벡터화), [mask-vector.mlir](lcc-opt/kernels/mask-vector.mlir)(나누어떨어지지 않는 타일과 마스크 벡터화) |
+| ④ ①·③의 결과가 x86_64·aarch64(qemu)에서 gcc와 비트까지 같다 | 두 타깃 모두 커널 다섯 × 구성 여덟 × `-O0`·`-O2`가 같다. 예외 둘은 [lcc-opt의 제약](#lcc-opt의-제약)에 |
+| ⑤ lcc의 기본 LLVM을 23으로 바꾼 뒤 시험 묶음이 통과한다 | CI의 `llvm/T`·`mlir/T` 작업. 드라이버가 lcc-opt(`--lcc-to-linalg --lcc-lower`)를 거치는 lcc로도 x86_64·aarch64에서 lcc 19, unit 26, c-testsuite 144, torture 618, llvm-bench 26이 모두 통과한다 |
+
+### 포팅 규약
+
+lcc-opt가 올리는 커널은 다음을 지킨다.
+
+- 배열은 파일 범위의 고정 크기 배열(`static` 포함)이고 크기는 상수다.
+- 루프 변수는 `int`이고 루프는 `for (v = a; v < b; v++)`나 `v += 상수` 꼴이다. 루프 변수의 주소를 취하거나 본문에서 바꾸지 않는다.
+- 루프 안에서 함수를 부르지 않는다. 인라인되는 `static` 함수는 된다.
+- 한 배열을 다른 원소 형으로 읽지 않는다.
+
+규약을 어긴 코드는 올라가지 않을 뿐 틀리게 컴파일되지 않는다. lcc-opt는 바꾼 뒤에도 같은 값이 됨을 상수와 값의 범위, affine 의존성
+분석으로 보일 수 있을 때만 바꾸고, C의 부호 있는 넘침이 정의되지 않는다는 것에는 기대지 않는다.
+
+### lcc-opt의 제약
+
+- MLIR 23만 받는다. lcc-opt는 MLIR 23의 결함 몇 가지를 피해 간다. `func.func`를 인라인할 때 byval 인자를 복사하고 인라인한 함수의
+  alloca를 진입 블록으로 옮기며(`lcc-byval-copy`, `lcc-hoist-allocas`), `llvm.func`의 루프를 올리고(`lcc-lift-llvm-func`),
+  `scf.while`을 `scf.for`로 직접 바꾸고(`lcc-uplift-while`), 텍스트로 쓰면 값이 바뀌는 IR을 거부하고(`lcc-check-text`), LLVM
+  IR로 내보낼 때의 블록 나누기를 정해진 순서로 먼저 하고(`lcc-distinct-successors`), 벡터 전송의 임시 버퍼가 루프 안에 생기지 않게
+  한다(`lcc-lower`).
+- 루프 묶음을 다른 연산 너머로 옮기는 업스트림 패스(`affine-loop-fusion` 등)는 쓰면 안 된다. lcc-opt는 루프 묶음 안만 보고 올리는데,
+  MLIR 23의 `affine-loop-fusion`은 묶음을 같은 전역을 고치는 호출이나 `llvm.store` 너머로 옮겨 결과가 틀린다. 비슷한 업스트림
+  이슈가 [llvm/llvm-project#211591](https://github.com/llvm/llvm-project/issues/211591),
+  [llvm/llvm-project#211599](https://github.com/llvm/llvm-project/issues/211599)다.
+- `affine-super-vectorize`는 `vectorize-reductions=true`로 쓴다. 없으면 `convfix.c`의 `o` 루프를 벡터화하면서 16바이트씩 떨어진
+  `w[o][i]`를 이어진 원소처럼 읽어 결과가 틀린다. MLIR 23의 이 패스는 보폭이 1이 아닌 접근을 이어진 것으로 보는 결함이 있어 `mm.c`의
+  `mm2`도 틀리게 벡터화하므로, check.sh는 `mm.c`의 affine 벡터화 구성을 돌리지 않는다.
+- float 합을 벡터화하면 더하는 순서가 C와 달라져 마지막 자리가 다를 수 있다. `affine-super-vectorize`의 리덕션 벡터화가
+  그렇고(`convff.c`에서 128값 중 24개, 상대 차이 3.1e-7 이하), check.sh는 이 구성의 `convff.c`는 비교하지 않고 다른 값의 수만
+  알린다. linalg의 `transform.structured.vectorize`는 순서를 지킨다. `vectorize_children_and_apply_patterns`는 기본으로 순서를
+  바꾸므로(128값 중 35개) `disable_multi_reduction_to_contract_patterns`를 준다.
+- memref의 `linalg.conv_2d`는 MLIR 23의 transform으로 벡터화하지 못해 타일링만 한다.
+
+자세한 것은 [lcc-opt/README.md](lcc-opt/README.md)에 있다.
 
 ## armhf의 off_t와 time_t
 
@@ -272,6 +380,8 @@ RISC-V 64에서 `_POSIX_C_SOURCE=200809L`이나 `_XOPEN_SOURCE=700`을 정의하
 | `etc/llvm-T.c`, `etc/mlir-T.c` | 타깃별 드라이버 호스트 파일 |
 | `etc/oe-linux.c` | Yocto 툴체인용 드라이버 |
 | `etc/cortexm3/` | Cortex-M3 보드 파일 |
+| `lcc-opt/` | lcc의 MLIR을 affine·linalg로 올리는 도구(따로 빌드, Apache-2.0 WITH LLVM-exception) |
+| `lcc-opt/kernels/` | lcc-opt의 완료 기준 커널, transform 스크립트, 검사 스크립트 |
 | `include/llvm/T/` | 타깃별 자체 헤더 |
 | `tst/` | lcc 자체의 시험(`tst/*.c`, 입력 `.0`) |
 | `tst/llvm/` | 단위 시험 |
