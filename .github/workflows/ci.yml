@@ -183,6 +183,77 @@ jobs:
         if: success() || failure()
         run: src/mlir-lint.sh -t
 
+  # lcc-opt (lcc-opt/), which raises lcc's MLIR to affine and linalg, built
+  # against LLVM 23 from apt.llvm.org: its lit tests, also built with ASan
+  # and UBSan, the kernels of lcc-opt/kernels against gcc, and the suites
+  # with an lcc whose driver lowers through lcc-opt --lcc-to-linalg.  The
+  # steps are those of lcc-opt-check.sh all.
+  lcc-opt:
+    name: lcc-opt, ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-linux, aarch64-linux]
+    env:
+      T: ${{ matrix.target }}
+      W: ${{ github.workspace }}/../lcc-opt-work
+      SUITES: ${{ github.workspace }}/../suites
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the tools
+        run: .github/scripts/lcc-opt-check.sh deps "$T"
+
+      - name: Cache the external suites
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../suites
+          key: suites-${{ hashFiles('.github/scripts/fetch-suites.sh') }}
+
+      - name: Fetch the external suites
+        run: .github/scripts/fetch-suites.sh "$SUITES"
+
+      - name: Build lcc-opt and run its tests
+        run: .github/scripts/lcc-opt-check.sh lit "$T" "$W"
+
+      - name: lcc-opt with ASan and UBSan, its tests
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh sanitizers "$T" "$W"
+
+      - name: Build lcc, also one that lowers through lcc-opt
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh lcc "$T" "$W"
+
+      - name: Kernels
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh kernels "$T" "$W"
+
+      - name: lcc
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" lcc
+
+      - name: unit
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" unit
+
+      - name: unit, optimized drivers
+        if: success() || failure()
+        run: DRVOPT=-O2 .github/scripts/lcc-opt-check.sh suite "$T" "$W" -o "$W/lcc-raise/unit-drvopt" unit
+
+      - name: c-testsuite
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" c-testsuite "$SUITES/c-testsuite"
+
+      - name: torture
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" torture "$SUITES/llvm-test-suite/SingleSource/Regression/C/gcc-c-torture/execute"
+
+      - name: llvm-bench
+        if: success() || failure()
+        run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" llvm-bench "$SUITES/llvm-test-suite"
+
   # Ubuntu does not package a riscv32 glibc toolchain. Building one takes an
   # hour, so it is cached, keyed on the script that pins its commit; the
   # other jobs wait for it only on the first run.
