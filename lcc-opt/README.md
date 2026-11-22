@@ -259,7 +259,8 @@ lcc는 전역 배열을 `!llvm.array<N x i8>`(0이 이어지는 초기값은 바
 - 위의 바이트 배열이다. 스칼라 변수(lcc는 제 형으로 낸다), 포인터 배열, 크기가 0인 불완전 배열 선언이 아니다.
 - 링크가 external이나 internal이다(lcc의 문자열 상수와 지역 배열 초기값은 private이라 바꾸지 않는다). 주소 공간 0,
   section·comdat·thread_local·다른 가시성이 없다.
-- 이름은 함수 본문의 `llvm.mlir.addressof`만 쓴다. 다른 전역의 초기값(과 제 초기값)이 주소를 쓰지 않는다.
+- 이름은 함수 본문의 `llvm.mlir.addressof`만 쓴다. 다른 전역의 초기값(과 제 초기값)이 주소를 쓰지 않는다. 함수 속성 안에서
+  심볼로 가리키는 전역(lcc `-Wf-pragma=NS`의 `NS.args`)도 바꾸지 않는다(remark `name used by func.func`).
 - load·store가 있고 모두 같은 형 T이며(타입 퍼닝이 아님), T는 8·16·32·64비트 정수나 `f32`·`f64`이고, N이 sizeof(T)의 배수다.
 - 초기값이 `llvm.mlir.zero`(→ `dense<0>`), 주소 조각이 없는 바이트 덩어리(→ 리틀 엔디언으로 푼 T의 `dense`, 음수 포함), 또는
   없다(선언 → 초기값 없는 `memref.global`). `f32`·`f64` 표는 바이트를 비트 그대로 풀어 −0.0, NaN의 페이로드와 부호, 무한대, 비정규
@@ -470,6 +471,7 @@ ninja -C build-lcc-opt check-lcc-opt
 | `transform.mlir` | `convfix.c`의 `lcc-to-linalg` 결과와 transform 스크립트 | 타일링·벡터화와 `lcc-lower` |
 | `distinct-successors.mlir` | 반복되는 후속 블록 | 그 순서대로 나누기 |
 | `lower.mlir` | `lcc-to-scf`·`lcc-to-affine`·`lcc-to-linalg`가 남기는 것, 업스트림 변환 뒤의 것 | `lcc-lower`가 scf·ub·arith·cf·func, affine·memref·vector, linalg를 남기지 않는 것 |
+| `pragma-attrs.mlir` | lcc가 `-Wf-pragma=knpu`로 낸 `.mlir` | `knpu.*` 함수 속성이 `lcc-to-linalg`·`lcc-lower`를 지나도 남는 것, 속성이 가리킨 전역이 그대로인 것(remark) |
 
 ### kernels
 
