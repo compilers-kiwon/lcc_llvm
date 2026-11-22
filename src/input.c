@@ -82,6 +82,12 @@ static void ident(void) {
 		cp++;
 }
 
+/* idchar - is c a character of a name? */
+static int idchar(int c) {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	    || c >= '0' && c <= '9' || c == '_';
+}
+
 /* isref - skip the first word of the #pragma at cp if it is ref; not
    with gettok, which reads on in the next line if this one has none */
 static int isref(void) {
@@ -89,33 +95,69 @@ static int isref(void) {
 
 	while (*s == ' ' || *s == '\t')
 		s++;
-	if (strncmp((char *)s, "ref", 3) != 0 || s[3] == '_'
-	|| s[3] >= 'a' && s[3] <= 'z' || s[3] >= 'A' && s[3] <= 'Z'
-	|| s[3] >= '0' && s[3] <= '9')
+	if (strncmp((char *)s, "ref", 3) != 0 || idchar(s[3]))
 		return 0;
 	cp = s + 3;
 	return 1;
 }
 
+/* refs - count the names in the rest of the #pragma ref line at cp as
+   used.  Not with gettok, which reads on in the next line after a \r
+   (CRLF) or a comment: the line ends at its \n, also inside a comment
+   or constant, which this skips */
+static void refs(void) {
+	Coordinate pos;
+	unsigned char *s;
+	Symbol p;
+	int q = 0;	/* '*' in a comment, '"' or '\'' in a constant */
+
+	for (;;) {
+		if (limit - cp < MAXLINE)
+			fillbuf();
+		if (*cp == '\n' || *cp == 0)
+			return;
+		if (q == '*') {
+			if (cp[0] == '*' && cp[1] == '/')
+				cp++, q = 0;
+			cp++;
+		} else if (q) {
+			if (*cp == '\\' && cp[1] != '\n' && cp[1] != 0)
+				cp++;
+			else if (*cp == q)
+				q = 0;
+			cp++;
+		} else if (cp[0] == '/' && cp[1] == '*')
+			cp += 2, q = '*';
+		else if (*cp == '"' || *cp == '\'')
+			q = *cp++;
+		else if (*cp == 'L' && (cp[1] == '"' || cp[1] == '\''))
+			cp++, q = *cp++;
+		else if (*cp >= '0' && *cp <= '9'
+		|| *cp == '.' && cp[1] >= '0' && cp[1] <= '9')
+			for (cp++; idchar(*cp) || *cp == '.'	/* a number */
+			|| (*cp == '+' || *cp == '-') && strchr("eEpP", cp[-1]); cp++)
+				;
+		else if (idchar(*cp)) {
+			for (s = cp; idchar(*cp); cp++)
+				;
+			if ((p = lookup(stringn((char *)s, cp - s), identifiers))) {
+				pos.file = file;
+				pos.x = (char *)s - line;
+				pos.y = lineno;
+				p->ref++;
+				use(p, pos);
+			}
+		} else
+			cp++;
+	}
+}
+
 /* pragma - handle #pragma ref id..., and #pragma NS ... of -pragma=NS */
 static void pragma(void) {
-	int pending = pragmapending;
-
 	if (pragmans > 0 && nspragma())
 		return;
-	pragmapending = 0;	/* gettok reads this line, not the next token */
 	if (isref())
-		for (;;) {
-			while (*cp == ' ' || *cp == '\t')
-				cp++;
-			if (*cp == '\n' || *cp == 0)
-				break;
-			if ((t = gettok()) == ID && tsym) {
-				tsym->ref++;
-				use(tsym, src);
-			}	
-		}
-	pragmapending |= pending;
+		refs();
 }
 
 /* resynch - set line number/file name in # n [ "file" ], #pragma, etc. */

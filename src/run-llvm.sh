@@ -35,7 +35,9 @@
 #                     with attr.1bk, its IR the same as without the options;
 #                     bare.c and bare.i (#pragma without a word) compiled
 #                     with and without the options and run, stdout compared
-#                     with bare.1bk;
+#                     with bare.1bk, so also a copy of refline.c with CRLF
+#                     line ends and refline.i (#pragma ref ends with its
+#                     line) with refline.1bk;
 #                     with MLIR, the attributes of attr.c, also with
 #                     -Wf-llvmfunc, and of a generated #pragma longer than
 #                     rcc's buffer compared with attr.abk and what they must
@@ -475,6 +477,24 @@ pragmattr() {
 	else report PASS attr-run; fi
 }
 
+# pragmarun name src bk: compile src with and without the options $P of
+# the pragma suite as name and name-off, run them, compare stdout with bk
+pragmarun() {
+	selected $1 || return 0
+	for x in $1 $1-off; do
+		o=$P; [ $x = $1 ] || o=
+		if ! timeout 300 $LCC $o -o $T/$x $2 $LCCLIBS >$T/$x.cerr 2>&1; then
+			report CFAIL $x "`head -1 $T/$x.cerr`"
+			continue
+		fi
+		execute $x /dev/null 60
+		if [ $status = 124 ]; then report TIMEOUT $x
+		elif [ $status != 0 ]; then report FAIL $x "exit status $status"
+		elif ! cmp -s $3 $T/$x.out; then report FAIL $x "stdout differs from $3"
+		else report PASS $x; fi
+	done
+}
+
 # pragmalong: a #pragma longer than rcc's input buffer
 pragmalong() {
 	awk 'BEGIN {
@@ -649,22 +669,11 @@ pragma)
 			else report FAIL ref "messages differ from tst/pragma/ref.2bk"; fi
 		fi
 		selected attr && pragmattr
-		for src in tst/pragma/bare.c tst/pragma/bare.i; do
-			n=bare-${src##*.}; selected $n || continue
-			for x in $n $n-off; do
-				o=$P; [ $x = $n ] || o=
-				if ! timeout 300 $LCC $o -o $T/$x $src $LCCLIBS >$T/$x.cerr 2>&1; then
-					report CFAIL $x "`head -1 $T/$x.cerr`"
-					continue
-				fi
-				execute $x /dev/null 60
-				if [ $status = 124 ]; then report TIMEOUT $x
-				elif [ $status != 0 ]; then report FAIL $x "exit status $status"
-				elif ! cmp -s tst/pragma/bare.1bk $T/$x.out; then
-					report FAIL $x "stdout differs from tst/pragma/bare.1bk"
-				else report PASS $x; fi
-			done
-		done
+		pragmarun bare-c tst/pragma/bare.c tst/pragma/bare.1bk
+		pragmarun bare-i tst/pragma/bare.i tst/pragma/bare.1bk
+		awk '{ printf "%s\r\n", $0 }' tst/pragma/refline.c >$T/refline-crlf.c
+		pragmarun refline-crlf $T/refline-crlf.c tst/pragma/refline.1bk
+		pragmarun refline-i tst/pragma/refline.i tst/pragma/refline.1bk
 		selected long && pragmalong
 		selected option && pragmaoption
 	fi ;;

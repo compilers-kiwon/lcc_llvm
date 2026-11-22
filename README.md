@@ -228,7 +228,7 @@ func.func @"layer1"() attributes {llvm.linkage = #llvm.linkage<internal>, knpu.o
 | `c-testsuite` | [c-testsuite](https://github.com/c-testsuite/c-testsuite)의 C89 시험 | 144 |
 | `torture` | GCC torture 시험(LLVM test-suite 안)의 C89 시험 | 618 |
 | `llvm-bench` | [LLVM test-suite](https://github.com/llvm/llvm-test-suite)의 벤치마크 | 26 |
-| `pragma` | `tst/pragma`. `-Wf-pragma=`의 오류 메시지, 옵션이 없을 때와 같은 IR, 실행 결과, mlir 백엔드의 속성과 MLIR 23의 읽기·bytecode·symbol-dce·`mlir-lint.sh` | 13(llvm), 18(mlir) |
+| `pragma` | `tst/pragma`. `-Wf-pragma=`의 오류 메시지, 옵션이 없을 때와 같은 IR, 실행 결과, mlir 백엔드의 속성과 MLIR 23의 읽기·bytecode·symbol-dce·`mlir-lint.sh` | 17(llvm), 22(mlir) |
 
 외부 묶음은 이 저장소에 복사하지 않았다. 체크아웃한 위치를 준다. C99 기능을 쓰는 시험은 뺀다.
 
