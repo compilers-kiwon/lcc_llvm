@@ -91,6 +91,10 @@ jobs:
         if: success() || failure()
         run: src/run-llvm.sh -q -t "$T" -b "$B" llvm-bench "$SUITES/llvm-test-suite"
 
+      - name: pragma
+        if: success() || failure()
+        run: src/run-llvm.sh -q -t "$T" -b "$B" pragma
+
       # lcc cannot run on the bare Cortex-M3 board; the cross stages of the
       # others run under qemu through binfmt_misc.
       - name: selfhost
@@ -151,6 +155,10 @@ jobs:
         if: success() || failure()
         run: src/run-llvm.sh -q -b "$B" llvm-bench "$SUITES/llvm-test-suite"
 
+      - name: pragma
+        if: success() || failure()
+        run: src/run-llvm.sh -q -b "$B" pragma
+
   # x86-64 only: the original x86/linux back end, the two back ends against
   # each other, and the MLIR lint's own tests.
   host:
@@ -187,7 +195,7 @@ jobs:
   # against LLVM 23 from apt.llvm.org: its lit tests, also built with ASan
   # and UBSan, the kernels of lcc-opt/kernels against gcc, and the suites
   # with an lcc whose driver lowers through lcc-opt --lcc-to-linalg.  The
-  # steps are those of lcc-opt-check.sh all.
+  # steps are those of lcc-opt-check.sh all, and the pragma suite.
   lcc-opt:
     name: lcc-opt, ${{ matrix.target }}
     runs-on: ubuntu-24.04
@@ -253,6 +261,12 @@ jobs:
       - name: llvm-bench
         if: success() || failure()
         run: .github/scripts/lcc-opt-check.sh suite "$T" "$W" llvm-bench "$SUITES/llvm-test-suite"
+
+      # not through lcc-opt-check.sh suite: the checks of the MLIR need
+      # LLVM's own mlir-opt, and $LCCOPT has the suite read it with lcc-opt
+      - name: pragma
+        if: success() || failure()
+        run: LCCOPT="$W/lcc-opt/bin/lcc-opt" src/run-llvm.sh -q -t "$T" -b "$W/lcc-raise" pragma
 
   # Ubuntu does not package a riscv32 glibc toolchain. Building one takes an
   # hour, so it is cached, keyed on the script that pins its commit; the
