@@ -3,6 +3,7 @@
 add_mlir_library(LccOptPasses
   CheckText.cpp
   DistinctSuccessors.cpp
+  DistributeReductions.cpp
   ExpandShapes.cpp
   GlobalsToMemref.cpp
   IndexLoops.cpp
@@ -25,6 +26,7 @@ add_mlir_library(LccOptPasses
   DISABLE_INSTALL
   )
 mlir_target_link_libraries(LccOptPasses PUBLIC
+  MLIRAffineAnalysis
   MLIRAffineDialect
   MLIRAffineToStandard
   MLIRArithDialect

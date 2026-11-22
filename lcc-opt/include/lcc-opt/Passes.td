@@ -439,4 +439,77 @@ def LccExpandShapes : Pass<"lcc-expand-shapes"> {
   ];
 }
 
+def LccDistributeReductions : Pass<"lcc-distribute-reductions"> {
+  let summary = "Split affine nests around a reduction loop with a buffer";
+  let description = [{
+    lcc-to-affine raises a C reduction such as
+
+    ```c
+    for (p = 0; p < 64; p++)
+      for (o = 0; o < 32; o++) {
+        int acc = bias[o];
+        for (i = 0; i < 16; i++)
+          acc += w[o][i] * in[p][i];
+        out[p][o] = clamp(acc);
+      }
+    ```
+
+    to an affine.for with iter_args inside the loops p and o.  This pass
+    expands the reduction variable into a buffer with a dimension for each
+    of the loops around the reduction loop, a memref.alloca at the start of
+    the function, and distributes those loops over the statements before,
+    the reduction loop and the statements after: one nest stores the
+    initial value, `buf[p][o] = bias[o]`, one reduces in the buffer,
+    `buf[p][o] += w[o][i] * in[p][i]` (load, compute and store in each
+    iteration of i, in the order of i), and one reads the result,
+    `out[p][o] = clamp(buf[p][o])`.  Reduction loops perfectly nested in
+    the reduction loop that carry its iter_args on, as in
+    `for (r...) for (s...) t += ...`, share its buffer: they lose their
+    iter_args too, and the innermost loads and stores the buffer.  A loop
+    without iter_args that accumulates in memory, storing at indices that
+    do not depend on its loop variable, as the loop of
+    `c[i][j] = 0; for (k...) c[i][j] += a[i][k] * b[k][j]`, is distributed
+    around likewise, without a buffer for it.  Other
+    values the later statements use
+    from the earlier ones are recomputed when they are side effect free
+    computations of the loop variables and values from outside, and
+    expanded into buffers too otherwise.  Each statement keeps its order
+    within its nest, so a float reduction adds the same values in the same
+    order.
+
+    The loops distributed are the loop around the reduction loop and the
+    loops around it whose bodies hold nothing but side effect free
+    operations and the next loop.  They must have constant bounds and no
+    iter_args, and the statements before and after the reduction loop must
+    be affine.load, affine.store or side effect free operations.  The pass
+    distributes only when affine dependence analysis
+    (checkMemrefAccessDependence) shows that no two accesses of the nest,
+    one of them a store, depend on each other across iterations of the
+    distributed loops, in either direction: then no statement depends on a
+    later statement, and running all instances of the statements before
+    first, then the reductions, then the statements after keeps every
+    dependence.  This covers a global that is read before the reduction
+    and written after it.  Accesses of one global through different memref
+    values, and any failure of the analysis, leave the nest alone.  The
+    buffers of a function take at most `max-buffer-bytes` bytes.
+
+    The pass works in rounds, innermost loops first: the nests of one
+    round may be distributed in a later round, around a loop in which
+    they are.
+
+    With `remarks`, it reports each reduction loop it distributes or
+    leaves, and why, as a remark.
+  }];
+  let options = [
+    Option<"remarks", "remarks", "bool", "false",
+      "Report each reduction loop as a remark">,
+    Option<"maxBufferBytes", "max-buffer-bytes", "int64_t", "65536",
+      "The most bytes of buffers in a function">,
+  ];
+  let dependentDialects = [
+    "mlir::affine::AffineDialect",
+    "mlir::memref::MemRefDialect",
+  ];
+}
+
 #endif // LCC_OPT_PASSES_TD
