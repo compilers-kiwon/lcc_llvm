@@ -394,4 +394,49 @@ def LccScfToAffine : Pass<"lcc-scf-to-affine"> {
   ];
 }
 
+def LccExpandShapes : Pass<"lcc-expand-shapes"> {
+  let summary = "View 1-D global memrefs with the shape of their C arrays";
+  let description = [{
+    lcc-globals-to-memref gives every global array a 1-D memref.global, and
+    lcc-scf-to-affine accesses it at row-major indices such as `p * 16 + i`.
+    This pass gives each such global, in each func.func, one view with the
+    shape the indices imply, a memref.expand_shape of a memref.get_global at
+    the start of the function, and makes every memref.load, memref.store,
+    affine.load and affine.store of the global in the function an access
+    of that view.  Affine analysis takes accesses to different memref
+    values for disjoint, so a function accesses a global through one value
+    only: the view, or the 1-D memref when the global is not expanded.
+
+    The shape comes from the coefficients of the affine indices: with the
+    coefficients and 1 sorted, s_1 > s_2 > ... > 1, each dividing the one
+    before and s_1 dividing the size N, the shape is
+    [N / s_1, s_1 / s_2, ..., s_k]; `p * 16 + i` of memref<1024xi8> makes
+    64x16.  A global is expanded only when every affine access splits into
+    indices of that shape whose terms are the same multiples of the same
+    loop variables and symbols, and whose ranges over the loop bounds lie
+    in the dimensions: in `p * 16 + i + 1` with i in [0, 16) the column
+    index i + 1 may be 16, so a global with such an access stays 1-D.  The
+    constant of an index goes to the dimensions so that the inner ones stay
+    in range, exactly (`p * 16 + i - 1` with i in [1, 17) is [p, i - 1]).
+    A memref.load or memref.store, at any index x, becomes an access at
+    [x floordiv s_1, (x mod s_1) floordiv s_2, ..., x mod s_(k-1)], which is
+    the same element for every x.  The other uses of the global's memref
+    (memref.extract_aligned_pointer_as_index) stay; any other use leaves the
+    global 1-D.
+
+    With `remarks`, it reports each global it expands or leaves in a
+    function, and why, as a remark: "nests need different shapes" when the
+    affine accesses of each loop nest alone would make a shape but those of
+    all nests together do not.
+  }];
+  let options = [
+    Option<"remarks", "remarks", "bool", "false",
+      "Report each global as a remark">,
+  ];
+  let dependentDialects = [
+    "mlir::affine::AffineDialect",
+    "mlir::memref::MemRefDialect",
+  ];
+}
+
 #endif // LCC_OPT_PASSES_TD

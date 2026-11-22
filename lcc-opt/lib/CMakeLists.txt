@@ -3,6 +3,7 @@
 add_mlir_library(LccOptPasses
   CheckText.cpp
   DistinctSuccessors.cpp
+  ExpandShapes.cpp
   GlobalsToMemref.cpp
   IndexLoops.cpp
   InlinePrep.cpp

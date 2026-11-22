@@ -7,6 +7,7 @@
 #ifndef LCC_OPT_PASSES_H
 #define LCC_OPT_PASSES_H
 
+#include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassOptions.h"
@@ -82,6 +83,22 @@ private:
 /// The bit width of `index` in the data layout of `op` (64 without a
 /// data layout specification).
 unsigned getIndexWidth(mlir::Operation *op);
+
+/// An affine expression as `constant + sum of dims[i] * d_i + sum of
+/// symbols[j] * s_j`.
+struct LinearExpr {
+  int64_t constant = 0;
+  llvm::SmallVector<int64_t, 4> dims, symbols;
+};
+
+/// The linear form of `expr`, an expression of `numDims` dimensions and
+/// `numSymbols` symbols, or nothing when it has a floordiv, ceildiv or mod,
+/// a product of two non-constants, or a value that does not fit in int64_t
+/// (defined in ExpandShapes.cpp, for lcc-expand-shapes,
+/// lcc-distribute-reductions and lcc-affine-to-linalg).
+std::optional<LinearExpr> getLinearExpr(mlir::AffineExpr expr,
+                                        unsigned numDims,
+                                        unsigned numSymbols);
 
 /// Adds the lcc-prepare pipeline to `pm`: lcc-memcpy-intrinsic, mem2reg,
 /// sroa, mem2reg, canonicalize, lcc-byval-copy, inline, lcc-hoist-allocas,
